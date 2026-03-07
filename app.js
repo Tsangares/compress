@@ -95,7 +95,7 @@ const dom = {
 // ============================================
 // Screen Navigation
 // ============================================
-function goToScreen(index) {
+function goToScreen(index, pushHistory = true) {
     const list = [screens.select, screens.options, screens.progress, screens.done, screens.about];
     state.currentScreen = index;
 
@@ -105,8 +105,29 @@ function goToScreen(index) {
         else if (i < index) s.classList.add('exit-left');
     });
 
+    // Push browser history so system back gesture works
+    if (pushHistory && index > 0) {
+        history.pushState({ screen: index }, '');
+    }
+
     if (navigator.vibrate) navigator.vibrate(10);
 }
+
+// System back button / swipe-back gesture
+window.addEventListener('popstate', (e) => {
+    if (state.currentScreen > 0) {
+        // Go back to previous logical screen
+        if (state.currentScreen === 4) {
+            // About → home
+            goToScreen(0, false);
+        } else if (state.currentScreen === 3) {
+            // Done → home (not back to progress)
+            goToScreen(0, false);
+        } else {
+            goToScreen(state.currentScreen - 1, false);
+        }
+    }
+});
 
 // ============================================
 // File Handling
@@ -223,14 +244,24 @@ dom.testEstimate.addEventListener('click', runAdvancedEstimate);
 async function runAdvancedEstimate() {
     if (!state.file || !state.ffmpegLoaded) {
         if (!state.ffmpegLoaded) {
+            setTestStatus('Loading engine...');
             await loadFFmpeg();
-            if (!state.ffmpegLoaded) return;
+            if (!state.ffmpegLoaded) {
+                setTestStatus(null);
+                return;
+            }
         }
     }
 
+    // Lock UI
     dom.testEstimate.disabled = true;
+    dom.compressBtn.disabled = true;
+    pills.forEach(p => p.disabled = true);
     dom.estTesting.classList.remove('hidden');
     dom.estTestedRow.classList.add('hidden');
+
+    // Reset all steps
+    resetSteps();
 
     const ffmpeg = state.ffmpeg;
     const preset = QUALITY_PRESETS[state.quality];
@@ -239,17 +270,20 @@ async function runAdvancedEstimate() {
     const sampleOut = 'sample_out.mp4';
 
     try {
-        // Write full file to FS if not already there
+        // Step 1: Load video
+        stepActive('load', `${formatBytes(state.file.size)} video`);
         if (!state.fileWritten) {
             await ffmpeg.writeFile(inputName, await fetchFile(state.file));
             state.fileWritten = true;
             state.inputName = inputName;
         }
+        stepDone('load');
 
-        // Extract a sample clip from the middle (3 seconds, or full video if < 6s)
-        const sampleDuration = Math.min(3, state.duration * 0.8);
+        // Step 2: Extract sample (1s clip for speed)
+        const sampleDuration = Math.min(1, state.duration * 0.5);
         const seekPoint = Math.max(0, (state.duration / 2) - (sampleDuration / 2));
 
+        stepActive('extract', `${sampleDuration.toFixed(1)}s from middle`);
         await ffmpeg.exec([
             '-ss', String(seekPoint),
             '-i', inputName,
@@ -258,26 +292,48 @@ async function runAdvancedEstimate() {
             '-y', sampleRaw,
         ]);
 
-        // Read sample to get raw size
         const rawData = await ffmpeg.readFile(sampleRaw);
         const rawSize = rawData.length;
+        stepDone('extract', formatBytes(rawSize));
 
-        // Compress the sample with current quality settings
-        const args = buildFFmpegArgs(sampleRaw, sampleOut, preset);
+        // Step 3: Encode sample (use veryfast preset for speed)
+        stepActive('encode', 'Starting...');
+        const encodeStart = Date.now();
+
+        const progressHandler = ({ progress }) => {
+            const pct = Math.min(Math.round(progress * 100), 99);
+            const elapsed = (Date.now() - encodeStart) / 1000;
+            let detail = `${pct}%`;
+            if (pct > 5) {
+                const eta = Math.round((elapsed / pct) * (100 - pct));
+                detail += ` — ~${eta}s left`;
+            }
+            stepDetail('encode', detail);
+        };
+        ffmpeg.on('progress', progressHandler);
+
+        // Use a fast preset for the test — ratio is close enough for estimation
+        const testPreset = { ...preset, preset: 'veryfast' };
+        const args = buildFFmpegArgs(sampleRaw, sampleOut, testPreset);
         await ffmpeg.exec(args);
+        ffmpeg.off('progress', progressHandler);
 
-        // Read compressed sample
         const outData = await ffmpeg.readFile(sampleOut);
         const outSize = outData.length;
+        const encodeTime = ((Date.now() - encodeStart) / 1000).toFixed(1);
+        stepDone('encode', `${formatBytes(outSize)} in ${encodeTime}s`);
 
-        // Calculate ratio and extrapolate
+        // Step 4: Calculate
+        stepActive('calc');
         const ratio = outSize / rawSize;
         const estimatedTotal = state.file.size * ratio;
+        const pctReduction = ((1 - ratio) * 100).toFixed(0);
+        stepDone('calc', `${pctReduction}% reduction ratio`);
 
         dom.estAdvanced.textContent = `~${formatBytes(estimatedTotal)}`;
         dom.estTestedRow.classList.remove('hidden');
 
-        // Clean up temp files
+        // Clean up
         await ffmpeg.deleteFile(sampleRaw).catch(() => {});
         await ffmpeg.deleteFile(sampleOut).catch(() => {});
 
@@ -287,8 +343,40 @@ async function runAdvancedEstimate() {
         dom.estTestedRow.classList.remove('hidden');
     }
 
-    dom.estTesting.classList.add('hidden');
+    // Unlock UI
     dom.testEstimate.disabled = false;
+    dom.compressBtn.disabled = false;
+    pills.forEach(p => p.disabled = false);
+}
+
+// Step UI helpers
+function resetSteps() {
+    document.querySelectorAll('.step').forEach(s => {
+        s.classList.remove('active', 'done');
+        const detail = s.querySelector('.step-detail');
+        if (detail) detail.textContent = '';
+    });
+}
+
+function stepActive(id, detail) {
+    const el = document.getElementById(`step-${id}`);
+    if (!el) return;
+    el.classList.add('active');
+    el.classList.remove('done');
+    if (detail) el.querySelector('.step-detail').textContent = detail;
+}
+
+function stepDone(id, detail) {
+    const el = document.getElementById(`step-${id}`);
+    if (!el) return;
+    el.classList.remove('active');
+    el.classList.add('done');
+    if (detail) el.querySelector('.step-detail').textContent = detail;
+}
+
+function stepDetail(id, text) {
+    const el = document.getElementById(`step-${id}-detail`);
+    if (el) el.textContent = text;
 }
 
 // ============================================
@@ -349,11 +437,19 @@ async function startCompression() {
     const preset = QUALITY_PRESETS[state.quality];
     const inputName = 'input' + getExtension(state.file.name);
     const outputName = 'output.mp4';
+    const compressStart = Date.now();
 
-    ffmpeg.on('progress', ({ progress }) => {
+    const progressHandler = ({ progress }) => {
         const pct = Math.min(Math.round(progress * 100), 99);
         updateProgress(pct);
-    });
+        // Show ETA
+        if (pct > 3) {
+            const elapsed = (Date.now() - compressStart) / 1000;
+            const eta = Math.round((elapsed / pct) * (100 - pct));
+            dom.progressStatus.textContent = `Compressing... ~${eta}s left`;
+        }
+    };
+    ffmpeg.on('progress', progressHandler);
 
     try {
         dom.progressStatus.textContent = 'Writing file...';
@@ -371,6 +467,8 @@ async function startCompression() {
         const args = buildFFmpegArgs(inputName, outputName, preset);
         await ffmpeg.exec(args);
 
+        ffmpeg.off('progress', progressHandler);
+
         dom.progressStatus.textContent = 'Reading output...';
         updateProgress(99);
 
@@ -381,9 +479,11 @@ async function startCompression() {
         await ffmpeg.deleteFile(outputName).catch(() => {});
         state.fileWritten = false;
 
+        const encodeTime = (Date.now() - compressStart) / 1000;
         updateProgress(100);
-        showDone();
+        showDone(encodeTime);
     } catch (err) {
+        ffmpeg.off('progress', progressHandler);
         console.error('Compression failed:', err);
         dom.progressStatus.textContent = 'Error: ' + err.message;
     }
@@ -445,17 +545,73 @@ function updateProgress(pct) {
 // ============================================
 // Done
 // ============================================
-function showDone() {
+function showDone(encodeTimeSec) {
     const originalSize = state.file.size;
     const compressedSize = state.outputBlob.size;
     const savings = ((1 - compressedSize / originalSize) * 100).toFixed(1);
+    const preset = QUALITY_PRESETS[state.quality];
 
+    // Hero comparison
     dom.beforeSize.textContent = formatBytes(originalSize);
     dom.afterSize.textContent = formatBytes(compressedSize);
     dom.savingsPercent.textContent = `${savings}%`;
 
+    // Input stats
+    const s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+    s('statInRes', `${state.width} x ${state.height}`);
+    s('statDuration', formatDuration(state.duration));
+    const inBitrateKbps = Math.round((originalSize * 8) / state.duration / 1000);
+    s('statInBitrate', `${formatBitrate(inBitrateKbps)}`);
+    s('statInSize', formatBytes(originalSize));
+
+    // Encoding stats
+    s('statCodec', 'H.264 (libx264)');
+    if (state.quality === 'target') {
+        const targetBitrate = Math.floor((preset.targetMB * 1024 * 1024 * 8) / state.duration / 1000);
+        s('statMode', `Target size (${preset.targetMB} MB)`);
+    } else {
+        s('statMode', `CRF ${preset.crf} (${state.quality})`);
+    }
+    s('statPreset', preset.preset);
+    s('statAudio', `AAC @ ${preset.audioBitrate}ps`);
+    s('statContainer', 'MP4 (faststart)');
+
+    // Output stats
+    s('statOutSize', formatBytes(compressedSize));
+    const outBitrateKbps = Math.round((compressedSize * 8) / state.duration / 1000);
+    s('statOutBitrate', formatBitrate(outBitrateKbps));
+    const ratio = (originalSize / compressedSize).toFixed(1);
+    s('statRatio', `${ratio}:1`);
+    s('statSaved', formatBytes(originalSize - compressedSize));
+
+    // Time stats
+    const encodeMin = Math.floor(encodeTimeSec / 60);
+    const encodeSec = Math.round(encodeTimeSec % 60);
+    s('statTime', encodeMin > 0 ? `${encodeMin}m ${encodeSec}s` : `${encodeSec}s`);
+    const speed = (state.duration / encodeTimeSec).toFixed(2);
+    s('statSpeed', `${speed}x realtime`);
+
+    // Explainer
+    let explainer = '';
+    if (state.quality === 'target') {
+        explainer = `Target size mode calculates the maximum video bitrate that fits ${preset.targetMB} MB given the video duration (${formatDuration(state.duration)}). The encoder constrains output using a bitrate cap with buffered rate control, ensuring the final file stays under the target.`;
+    } else {
+        explainer = `CRF (Constant Rate Factor) mode lets the encoder decide the bitrate per-frame based on visual complexity. CRF ${preset.crf} targets "${state.quality}" quality — simpler frames get fewer bits, complex frames get more. This produces the best quality-per-byte but the output size varies by content.`;
+    }
+    if (preset.scale && state.height > preset.scale) {
+        explainer += ` Resolution was scaled to ${preset.scale}p to reduce file size further.`;
+    }
+    explainer += ' Container uses "faststart" flag to move the moov atom to the front, allowing playback to begin before the full file downloads.';
+    s('statExplainer', explainer);
+
     if (navigator.vibrate) navigator.vibrate([50, 50, 100]);
     goToScreen(3);
+}
+
+function formatBitrate(kbps) {
+    if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbps`;
+    return `${kbps} kbps`;
 }
 
 dom.saveBtn.addEventListener('click', () => {

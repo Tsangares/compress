@@ -137,14 +137,15 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
 }
 
 .nav-back {
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     display: grid;
     place-items: center;
     border: none;
     background: var(--surface);
     color: var(--text);
     border-radius: var(--r-full);
+    min-width: 44px;
     cursor: pointer;
     box-shadow: var(--shadow-sm);
     transition: transform 0.2s var(--spring);
@@ -423,7 +424,12 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     white-space: nowrap;
 }
 
-.pill:active { transform: scale(0.94); }
+.pill:active:not(:disabled) { transform: scale(0.94); }
+
+.pill:disabled {
+    opacity: 0.4;
+    pointer-events: none;
+}
 
 .pill.active {
     background: var(--text);
@@ -669,6 +675,88 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     border-radius: var(--r-full);
 }
 
+/* ---- Done header (replaces center-v) ---- */
+.done-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding-top: calc(40px + var(--safe-t));
+    padding-bottom: 8px;
+}
+
+/* ======================================================
+   Stats Panel
+   ====================================================== */
+
+.stats-panel {
+    margin-top: 24px;
+    padding-bottom: 20px;
+}
+
+.stats-heading {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 16px;
+}
+
+.stats-group {
+    background: var(--surface);
+    border-radius: var(--r);
+    box-shadow: var(--shadow-sm);
+    padding: 4px 0;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.stats-group-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-3);
+    padding: 10px 16px 4px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 9px 16px;
+    gap: 12px;
+}
+
+.stat-row + .stat-row {
+    border-top: 1px solid var(--border);
+}
+
+.stat-key {
+    font-size: 13px;
+    color: var(--text-2);
+    font-weight: 500;
+}
+
+.stat-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-val.highlight {
+    color: var(--success);
+    font-weight: 700;
+}
+
+.stats-explainer {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-3);
+    padding: 8px 16px 12px;
+}
+
 /* ======================================================
    Estimation
    ====================================================== */
@@ -760,24 +848,86 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     height: 16px;
 }
 
-.estimate-testing {
+/* ---- Test steps checklist ---- */
+.test-steps {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 12px;
-    font-size: 13px;
-    color: var(--text-3);
-    font-weight: 500;
+    flex-direction: column;
+    gap: 2px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-radius: var(--r);
+    box-shadow: var(--shadow-sm);
 }
 
-.mini-spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid var(--surface-dim);
-    border-top-color: var(--accent);
+.step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 8px 0;
+    opacity: 0.35;
+    transition: opacity 0.3s;
+}
+
+.step.active, .step.done {
+    opacity: 1;
+}
+
+.step-icon {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
     border-radius: 50%;
-    animation: spin 0.6s linear infinite;
+    border: 2px solid var(--border-strong);
+    margin-top: 1px;
+    position: relative;
+    transition: border-color 0.3s, background 0.3s;
+}
+
+.step.active .step-icon {
+    border-color: var(--accent);
+    border-top-color: transparent;
+    animation: spin 0.7s linear infinite;
+}
+
+.step.done .step-icon {
+    border-color: var(--success);
+    background: var(--success);
+}
+
+.step.done .step-icon::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 5px;
+    width: 5px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.step-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.step-detail {
+    font-size: 12px;
+    color: var(--text-3);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+.step-detail:empty {
+    display: none;
 }
 
 @keyframes spin {

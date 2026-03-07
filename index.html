@@ -116,9 +116,35 @@
                         <span class="estimate-tag good">tested</span>
                     </div>
 
-                    <div class="estimate-testing hidden" id="estTesting">
-                        <div class="mini-spinner"></div>
-                        <span>Encoding sample...</span>
+                    <div class="test-steps hidden" id="estTesting">
+                        <div class="step" id="step-load">
+                            <div class="step-icon"></div>
+                            <div class="step-body">
+                                <span class="step-name">Load video into memory</span>
+                                <span class="step-detail" id="step-load-detail"></span>
+                            </div>
+                        </div>
+                        <div class="step" id="step-extract">
+                            <div class="step-icon"></div>
+                            <div class="step-body">
+                                <span class="step-name">Extract sample clip</span>
+                                <span class="step-detail" id="step-extract-detail"></span>
+                            </div>
+                        </div>
+                        <div class="step" id="step-encode">
+                            <div class="step-icon"></div>
+                            <div class="step-body">
+                                <span class="step-name">Encode sample</span>
+                                <span class="step-detail" id="step-encode-detail"></span>
+                            </div>
+                        </div>
+                        <div class="step" id="step-calc">
+                            <div class="step-icon"></div>
+                            <div class="step-body">
+                                <span class="step-name">Calculate estimate</span>
+                                <span class="step-detail" id="step-calc-detail"></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -161,8 +187,8 @@
 
         <!-- Screen 4: Done -->
         <div id="screen-done" class="screen" data-screen="3">
-            <div class="screen-inner center-v">
-                <div class="done-block">
+            <div class="screen-inner scroll-y">
+                <div class="done-header">
                     <div class="done-icon">
                         <svg viewBox="0 0 48 48" fill="none">
                             <circle cx="24" cy="24" r="22" fill="#10B981" opacity="0.12"/>
@@ -187,6 +213,88 @@
 
                     <div class="savings-badge">
                         <span id="savingsPercent">--</span> smaller
+                    </div>
+                </div>
+
+                <!-- Compression Stats -->
+                <div class="stats-panel">
+                    <h3 class="stats-heading">Compression Details</h3>
+
+                    <div class="stats-group">
+                        <div class="stats-group-label">Input</div>
+                        <div class="stat-row">
+                            <span class="stat-key">Resolution</span>
+                            <span class="stat-val" id="statInRes">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Duration</span>
+                            <span class="stat-val" id="statDuration">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Bitrate (original)</span>
+                            <span class="stat-val" id="statInBitrate">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">File size</span>
+                            <span class="stat-val" id="statInSize">--</span>
+                        </div>
+                    </div>
+
+                    <div class="stats-group">
+                        <div class="stats-group-label">Encoding</div>
+                        <div class="stat-row">
+                            <span class="stat-key">Codec</span>
+                            <span class="stat-val" id="statCodec">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Mode</span>
+                            <span class="stat-val" id="statMode">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Preset</span>
+                            <span class="stat-val" id="statPreset">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Audio</span>
+                            <span class="stat-val" id="statAudio">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Container</span>
+                            <span class="stat-val" id="statContainer">--</span>
+                        </div>
+                    </div>
+
+                    <div class="stats-group">
+                        <div class="stats-group-label">Output</div>
+                        <div class="stat-row">
+                            <span class="stat-key">File size</span>
+                            <span class="stat-val highlight" id="statOutSize">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Bitrate (output)</span>
+                            <span class="stat-val" id="statOutBitrate">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Compression ratio</span>
+                            <span class="stat-val" id="statRatio">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Space saved</span>
+                            <span class="stat-val highlight" id="statSaved">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Encoding time</span>
+                            <span class="stat-val" id="statTime">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-key">Encoding speed</span>
+                            <span class="stat-val" id="statSpeed">--</span>
+                        </div>
+                    </div>
+
+                    <div class="stats-group">
+                        <div class="stats-group-label">How it works</div>
+                        <p class="stats-explainer" id="statExplainer">--</p>
                     </div>
                 </div>
             </div>
