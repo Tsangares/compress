@@ -18,7 +18,6 @@ const state = {
 
 const QUALITY_PRESETS = {
     high: {
-        label: 'High Quality',
         desc: 'Visually lossless. Slight file size reduction (~30% smaller).',
         crf: 23,
         preset: 'medium',
@@ -26,7 +25,6 @@ const QUALITY_PRESETS = {
         scale: null,
     },
     medium: {
-        label: 'Medium Quality',
         desc: 'Good balance of quality and file size (~60% smaller).',
         crf: 28,
         preset: 'medium',
@@ -34,7 +32,6 @@ const QUALITY_PRESETS = {
         scale: null,
     },
     low: {
-        label: 'Low Quality',
         desc: 'Smaller files, reduced quality. Good for messaging (~80% smaller).',
         crf: 35,
         preset: 'fast',
@@ -42,7 +39,6 @@ const QUALITY_PRESETS = {
         scale: 720,
     },
     target: {
-        label: 'Under 10 MB',
         desc: 'Calculates the best settings to fit under 10 MB. May reduce resolution.',
         targetMB: 10,
         preset: 'medium',
@@ -51,7 +47,7 @@ const QUALITY_PRESETS = {
 };
 
 // ============================================
-// DOM Elements
+// DOM
 // ============================================
 const $ = (sel) => document.querySelector(sel);
 const screens = {
@@ -82,27 +78,22 @@ const dom = {
     shareBtn: $('#shareBtn'),
     anotherBtn: $('#anotherBtn'),
     loadingBar: $('#loading-bar'),
-    loadingBarFill: $('.loading-bar-fill'),
+    loadingBarFill: $('.engine-loader-fill'),
 };
 
 // ============================================
 // Screen Navigation
 // ============================================
 function goToScreen(index) {
-    const screenList = [screens.select, screens.options, screens.progress, screens.done];
-    const prev = state.currentScreen;
+    const list = [screens.select, screens.options, screens.progress, screens.done];
     state.currentScreen = index;
 
-    screenList.forEach((s, i) => {
+    list.forEach((s, i) => {
         s.classList.remove('active', 'exit-left');
-        if (i === index) {
-            s.classList.add('active');
-        } else if (i < index) {
-            s.classList.add('exit-left');
-        }
+        if (i === index) s.classList.add('active');
+        else if (i < index) s.classList.add('exit-left');
     });
 
-    // Haptic feedback
     if (navigator.vibrate) navigator.vibrate(10);
 }
 
@@ -113,7 +104,6 @@ function handleFile(file) {
     if (!file || !file.type.startsWith('video/')) return;
     state.file = file;
 
-    // Load preview and get metadata
     const url = URL.createObjectURL(file);
     dom.preview.src = url;
     dom.preview.play().catch(() => {});
@@ -130,7 +120,6 @@ function handleFile(file) {
         goToScreen(1);
     };
 
-    // Start loading FFmpeg in background
     loadFFmpeg();
 }
 
@@ -154,30 +143,22 @@ dom.fileInput.addEventListener('change', (e) => {
 });
 
 // ============================================
-// Quality Selector
+// Quality Selector (pills instead of segmented)
 // ============================================
-const segBtns = dom.qualityControl.querySelectorAll('.seg-btn');
-const segIndicator = dom.qualityControl.querySelector('.seg-indicator');
+const pills = dom.qualityControl.querySelectorAll('.pill');
 
-segBtns.forEach((btn, i) => {
+pills.forEach((btn) => {
     btn.addEventListener('click', () => {
-        segBtns.forEach(b => b.classList.remove('active'));
+        pills.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         state.quality = btn.dataset.quality;
 
-        // Move indicator
-        segIndicator.style.transform = `translateX(${i * 100}%)`;
-
-        // Update description
         const preset = QUALITY_PRESETS[state.quality];
-        dom.qualityDesc.querySelector('p').textContent = preset.desc;
+        dom.qualityDesc.textContent = preset.desc;
 
         if (navigator.vibrate) navigator.vibrate(5);
     });
 });
-
-// Set initial indicator position (medium = index 1)
-segIndicator.style.transform = 'translateX(100%)';
 
 // ============================================
 // FFmpeg Loading
@@ -187,11 +168,6 @@ async function loadFFmpeg() {
 
     state.ffmpeg = new FFmpeg();
     dom.loadingBar.classList.remove('hidden');
-
-    state.ffmpeg.on('log', ({ message }) => {
-        // Optional: debug logging
-        // console.log('[ffmpeg]', message);
-    });
 
     try {
         const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
@@ -214,7 +190,7 @@ async function loadFFmpeg() {
         }, 500);
     } catch (err) {
         console.error('Failed to load FFmpeg:', err);
-        dom.loadingBar.querySelector('.loading-bar-text').textContent =
+        dom.loadingBar.querySelector('.engine-loader-label').textContent =
             'Failed to load engine. Please refresh.';
     }
 }
@@ -228,10 +204,10 @@ async function startCompression() {
     if (!state.file || !state.ffmpegLoaded) {
         if (!state.ffmpegLoaded) {
             dom.compressBtn.disabled = true;
-            dom.compressBtn.querySelector('span').textContent = 'Loading engine...';
+            dom.compressBtn.querySelector('span').textContent = 'Loading...';
             await loadFFmpeg();
             dom.compressBtn.disabled = false;
-            dom.compressBtn.querySelector('span').textContent = 'Compress Video';
+            dom.compressBtn.querySelector('span').textContent = 'Compress';
         }
         return;
     }
@@ -243,7 +219,6 @@ async function startCompression() {
     const inputName = 'input' + getExtension(state.file.name);
     const outputName = 'output.mp4';
 
-    // Progress tracking
     ffmpeg.on('progress', ({ progress }) => {
         const pct = Math.min(Math.round(progress * 100), 99);
         updateProgress(pct);
@@ -258,8 +233,6 @@ async function startCompression() {
         dom.progressStatus.textContent = 'Compressing...';
 
         const args = buildFFmpegArgs(inputName, outputName, preset);
-        console.log('[ffmpeg] args:', args.join(' '));
-
         await ffmpeg.exec(args);
 
         dom.progressStatus.textContent = 'Reading output...';
@@ -268,7 +241,6 @@ async function startCompression() {
         const data = await ffmpeg.readFile(outputName);
         state.outputBlob = new Blob([data.buffer], { type: 'video/mp4' });
 
-        // Clean up
         await ffmpeg.deleteFile(inputName);
         await ffmpeg.deleteFile(outputName);
 
@@ -284,13 +256,11 @@ function buildFFmpegArgs(input, output, preset) {
     const args = ['-i', input];
 
     if (state.quality === 'target') {
-        // Calculate target bitrate for file size constraint
         const targetBytes = preset.targetMB * 1024 * 1024;
         const audioBitrateKbps = parseInt(preset.audioBitrate) || 64;
         const totalBitrateKbps = Math.floor((targetBytes * 8) / state.duration / 1000);
         let videoBitrateKbps = totalBitrateKbps - audioBitrateKbps;
 
-        // Scale down if bitrate is too low for good quality
         if (videoBitrateKbps < 200 && state.height > 480) {
             args.push('-vf', 'scale=-2:480');
         } else if (videoBitrateKbps < 500 && state.height > 720) {
@@ -307,7 +277,6 @@ function buildFFmpegArgs(input, output, preset) {
             '-bufsize', `${Math.floor(videoBitrateKbps * 2)}k`,
         );
     } else {
-        // CRF mode
         if (preset.scale && state.height > preset.scale) {
             args.push('-vf', `scale=-2:${preset.scale}`);
         }
@@ -330,14 +299,14 @@ function buildFFmpegArgs(input, output, preset) {
 }
 
 function updateProgress(pct) {
-    const circumference = 2 * Math.PI * 70; // r=70
+    const circumference = 2 * Math.PI * 68; // r=68
     const offset = circumference - (pct / 100) * circumference;
     dom.progressRing.style.strokeDashoffset = offset;
     dom.progressPercent.textContent = pct;
 }
 
 // ============================================
-// Done Screen
+// Done
 // ============================================
 function showDone() {
     const originalSize = state.file.size;
@@ -349,46 +318,34 @@ function showDone() {
     dom.savingsPercent.textContent = `${savings}%`;
 
     if (navigator.vibrate) navigator.vibrate([50, 50, 100]);
-
     goToScreen(3);
 }
 
-// Save / Download
 dom.saveBtn.addEventListener('click', () => {
     if (!state.outputBlob) return;
-
     const baseName = state.file.name.replace(/\.[^.]+$/, '');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(state.outputBlob);
     a.download = `${baseName}_compressed.mp4`;
     a.click();
     URL.revokeObjectURL(a.href);
-
     if (navigator.vibrate) navigator.vibrate(10);
 });
 
-// Share
 dom.shareBtn.addEventListener('click', async () => {
     if (!state.outputBlob || !navigator.share) {
-        // Fallback: just download
         dom.saveBtn.click();
         return;
     }
-
     const baseName = state.file.name.replace(/\.[^.]+$/, '');
     const file = new File([state.outputBlob], `${baseName}_compressed.mp4`, { type: 'video/mp4' });
-
     try {
         await navigator.share({ files: [file] });
     } catch (err) {
-        if (err.name !== 'AbortError') {
-            console.error('Share failed:', err);
-            dom.saveBtn.click();
-        }
+        if (err.name !== 'AbortError') dom.saveBtn.click();
     }
 });
 
-// Compress Another
 dom.anotherBtn.addEventListener('click', () => {
     state.file = null;
     state.outputBlob = null;
@@ -399,21 +356,13 @@ dom.anotherBtn.addEventListener('click', () => {
 });
 
 // ============================================
-// Cancel
+// Cancel & Back
 // ============================================
-dom.cancelBtn.addEventListener('click', () => {
-    // FFmpeg.wasm doesn't support true cancel, so we just navigate back
-    goToScreen(1);
-});
+dom.cancelBtn.addEventListener('click', () => goToScreen(1));
 
-// ============================================
-// Back Buttons
-// ============================================
 document.querySelectorAll('[data-back]').forEach(btn => {
     btn.addEventListener('click', () => {
-        if (state.currentScreen > 0) {
-            goToScreen(state.currentScreen - 1);
-        }
+        if (state.currentScreen > 0) goToScreen(state.currentScreen - 1);
     });
 });
 
@@ -440,7 +389,7 @@ function getExtension(filename) {
 }
 
 // ============================================
-// PWA Install Prompt
+// PWA
 // ============================================
 let deferredPrompt;
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -448,35 +397,6 @@ window.addEventListener('beforeinstallprompt', (e) => {
     deferredPrompt = e;
 });
 
-// ============================================
-// Service Worker Registration
-// ============================================
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-
-// ============================================
-// SVG Gradient (injected for progress ring)
-// ============================================
-const svgNS = 'http://www.w3.org/2000/svg';
-const progressSvg = $('.progress-ring');
-const defs = document.createElementNS(svgNS, 'defs');
-const gradient = document.createElementNS(svgNS, 'linearGradient');
-gradient.id = 'progressGradient';
-gradient.setAttribute('x1', '0%');
-gradient.setAttribute('y1', '0%');
-gradient.setAttribute('x2', '100%');
-gradient.setAttribute('y2', '0%');
-
-const stop1 = document.createElementNS(svgNS, 'stop');
-stop1.setAttribute('offset', '0%');
-stop1.setAttribute('stop-color', '#6366f1');
-
-const stop2 = document.createElementNS(svgNS, 'stop');
-stop2.setAttribute('offset', '100%');
-stop2.setAttribute('stop-color', '#8b5cf6');
-
-gradient.appendChild(stop1);
-gradient.appendChild(stop2);
-defs.appendChild(gradient);
-progressSvg.prepend(defs);

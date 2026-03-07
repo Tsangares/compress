@@ -4,175 +4,170 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#0a0a0f">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#FAF8F5">
     <meta name="description" content="Compress videos instantly on your device. No uploads, no servers.">
     <title>Compress</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗜️</text></svg>">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="preconnect" href="https://unpkg.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div id="app">
         <!-- Screen 1: Select Video -->
         <div id="screen-select" class="screen active" data-screen="0">
-            <div class="screen-content">
-                <div class="hero-section">
-                    <div class="app-icon">
-                        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="8" y="6" width="32" height="36" rx="4" stroke="currentColor" stroke-width="2.5"/>
-                            <path d="M16 18L24 24L32 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M16 30L24 24L32 30" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            <line x1="16" y1="12" x2="32" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-                            <line x1="16" y1="36" x2="32" y2="36" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-                        </svg>
-                    </div>
-                    <h1>Compress</h1>
-                    <p class="subtitle">Shrink videos on your device.<br>Nothing leaves your phone.</p>
+            <div class="screen-inner">
+                <div class="select-top">
+                    <span class="badge">100% on-device</span>
+                    <h1>Shrink<br>your video.</h1>
+                    <p class="tagline">Compress locally. Nothing uploaded. Ever.</p>
                 </div>
 
-                <label class="file-drop-zone" id="dropZone">
+                <label class="file-picker" id="dropZone">
                     <input type="file" accept="video/*" id="fileInput" hidden>
-                    <div class="drop-content">
-                        <svg class="drop-icon" viewBox="0 0 48 48" fill="none">
-                            <path d="M24 32V12M24 32L16 24M24 32L32 24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M8 36H40" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-                        </svg>
-                        <span class="drop-text">Select Video</span>
-                        <span class="drop-hint">or drag & drop</span>
+                    <div class="picker-inner">
+                        <div class="picker-icon">
+                            <svg viewBox="0 0 32 32" fill="none">
+                                <path d="M16 22V6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                                <path d="M10 12L16 6L22 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M4 20v4a4 4 0 004 4h16a4 4 0 004-4v-4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+                            </svg>
+                        </div>
+                        <span class="picker-label">Choose video</span>
+                        <span class="picker-sub">or drop it here</span>
                     </div>
                 </label>
             </div>
 
-            <div id="loading-bar" class="loading-bar hidden">
-                <div class="loading-bar-text">Loading compression engine...</div>
-                <div class="loading-bar-track"><div class="loading-bar-fill"></div></div>
+            <div id="loading-bar" class="engine-loader hidden">
+                <div class="engine-loader-label">Loading engine</div>
+                <div class="engine-loader-track"><div class="engine-loader-fill"></div></div>
             </div>
         </div>
 
         <!-- Screen 2: Options -->
         <div id="screen-options" class="screen" data-screen="1">
-            <div class="screen-header">
-                <button class="back-btn" data-back>
-                    <svg viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="screen-nav">
+                <button class="nav-back" data-back>
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
-                <h2>Options</h2>
-                <div class="spacer"></div>
+                <span class="nav-title">Settings</span>
+                <div class="nav-spacer"></div>
             </div>
 
-            <div class="screen-content">
-                <div class="preview-container">
+            <div class="screen-inner scroll-y">
+                <div class="preview-card">
                     <video id="preview" playsinline muted loop></video>
                 </div>
 
-                <div class="file-info" id="fileInfo">
-                    <div class="info-chip">
-                        <span class="info-label">Size</span>
-                        <span class="info-value" id="infoSize">--</span>
+                <div class="meta-strip" id="fileInfo">
+                    <div class="meta-item">
+                        <span class="meta-val" id="infoSize">--</span>
+                        <span class="meta-key">size</span>
                     </div>
-                    <div class="info-chip">
-                        <span class="info-label">Duration</span>
-                        <span class="info-value" id="infoDuration">--</span>
+                    <div class="meta-dot"></div>
+                    <div class="meta-item">
+                        <span class="meta-val" id="infoDuration">--</span>
+                        <span class="meta-key">length</span>
                     </div>
-                    <div class="info-chip">
-                        <span class="info-label">Resolution</span>
-                        <span class="info-value" id="infoRes">--</span>
-                    </div>
-                </div>
-
-                <div class="option-section">
-                    <label class="option-label">Quality</label>
-                    <div class="segmented-control" id="qualityControl">
-                        <button class="seg-btn" data-quality="high">High</button>
-                        <button class="seg-btn active" data-quality="medium">Medium</button>
-                        <button class="seg-btn" data-quality="low">Low</button>
-                        <button class="seg-btn" data-quality="target">< 10 MB</button>
-                        <div class="seg-indicator"></div>
+                    <div class="meta-dot"></div>
+                    <div class="meta-item">
+                        <span class="meta-val" id="infoRes">--</span>
+                        <span class="meta-key">resolution</span>
                     </div>
                 </div>
 
-                <div class="quality-description" id="qualityDesc">
-                    <p>Good balance of quality and file size. ~60% smaller.</p>
+                <div class="quality-section">
+                    <div class="quality-pills" id="qualityControl">
+                        <button class="pill" data-quality="high">High</button>
+                        <button class="pill active" data-quality="medium">Medium</button>
+                        <button class="pill" data-quality="low">Low</button>
+                        <button class="pill accent" data-quality="target">&lt; 10 MB</button>
+                    </div>
+                    <p class="quality-hint" id="qualityDesc">Good balance of quality and file size. ~60% smaller.</p>
                 </div>
             </div>
 
-            <div class="screen-footer">
-                <button class="action-btn" id="compressBtn">
-                    <span>Compress Video</span>
+            <div class="screen-bottom">
+                <button class="btn-primary" id="compressBtn">
+                    <span>Compress</span>
+                    <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12M12 6l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             </div>
         </div>
 
         <!-- Screen 3: Compressing -->
         <div id="screen-progress" class="screen" data-screen="2">
-            <div class="screen-header">
-                <div class="spacer"></div>
-                <h2>Compressing</h2>
-                <div class="spacer"></div>
-            </div>
-
-            <div class="screen-content center-content">
-                <div class="progress-ring-container">
-                    <svg class="progress-ring" viewBox="0 0 160 160">
-                        <circle class="progress-ring-bg" cx="80" cy="80" r="70" />
-                        <circle class="progress-ring-fill" id="progressRing" cx="80" cy="80" r="70" />
-                    </svg>
-                    <div class="progress-text">
-                        <span class="progress-percent" id="progressPercent">0</span>
-                        <span class="progress-unit">%</span>
+            <div class="screen-inner center-v">
+                <div class="progress-block">
+                    <div class="progress-ring-wrap">
+                        <svg class="progress-ring" viewBox="0 0 160 160">
+                            <defs>
+                                <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#F97316"/>
+                                    <stop offset="100%" stop-color="#E11D48"/>
+                                </linearGradient>
+                            </defs>
+                            <circle class="ring-bg" cx="80" cy="80" r="68"/>
+                            <circle class="ring-fill" id="progressRing" cx="80" cy="80" r="68"/>
+                        </svg>
+                        <div class="ring-label">
+                            <span class="ring-pct" id="progressPercent">0</span><span class="ring-sym">%</span>
+                        </div>
                     </div>
+                    <p class="progress-msg" id="progressStatus">Preparing...</p>
                 </div>
-                <p class="progress-status" id="progressStatus">Preparing...</p>
             </div>
 
-            <div class="screen-footer">
-                <button class="cancel-btn" id="cancelBtn">Cancel</button>
+            <div class="screen-bottom">
+                <button class="btn-ghost danger" id="cancelBtn">Cancel</button>
             </div>
         </div>
 
         <!-- Screen 4: Done -->
         <div id="screen-done" class="screen" data-screen="3">
-            <div class="screen-header">
-                <div class="spacer"></div>
-                <h2>Done</h2>
-                <div class="spacer"></div>
-            </div>
+            <div class="screen-inner center-v">
+                <div class="done-block">
+                    <div class="done-icon">
+                        <svg viewBox="0 0 48 48" fill="none">
+                            <circle cx="24" cy="24" r="22" fill="#10B981" opacity="0.12"/>
+                            <circle cx="24" cy="24" r="22" stroke="#10B981" stroke-width="2"/>
+                            <path d="M15 24L21 30L33 18" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
 
-            <div class="screen-content center-content">
-                <div class="done-check">
-                    <svg viewBox="0 0 48 48" fill="none">
-                        <circle cx="24" cy="24" r="22" stroke="currentColor" stroke-width="2.5"/>
-                        <path d="M14 24L21 31L34 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
+                    <div class="size-compare">
+                        <div class="size-row">
+                            <span class="size-label">Before</span>
+                            <span class="size-val" id="beforeSize">--</span>
+                        </div>
+                        <div class="size-arrow">
+                            <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 19l-4-4M12 19l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </div>
+                        <div class="size-row result">
+                            <span class="size-label">After</span>
+                            <span class="size-val" id="afterSize">--</span>
+                        </div>
+                    </div>
 
-                <div class="comparison">
-                    <div class="compare-row">
-                        <span class="compare-label">Before</span>
-                        <span class="compare-value" id="beforeSize">--</span>
-                    </div>
-                    <div class="compare-arrow">
-                        <svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M12 19l-5-5M12 19l5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </div>
-                    <div class="compare-row highlight">
-                        <span class="compare-label">After</span>
-                        <span class="compare-value" id="afterSize">--</span>
-                    </div>
-                    <div class="compare-savings">
+                    <div class="savings-badge">
                         <span id="savingsPercent">--</span> smaller
                     </div>
                 </div>
             </div>
 
-            <div class="screen-footer">
-                <button class="action-btn" id="saveBtn">
-                    <svg viewBox="0 0 24 24" fill="none" class="btn-icon"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="screen-bottom">
+                <button class="btn-primary" id="saveBtn">
+                    <svg viewBox="0 0 20 20" fill="none" class="btn-ico"><path d="M17 12.5v3.333A1.667 1.667 0 0115.333 17.5H4.667A1.667 1.667 0 013 15.833V12.5M6.667 8.333L10 11.667l3.333-3.334M10 11.667V2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <span>Save Video</span>
                 </button>
-                <button class="secondary-btn" id="shareBtn">Share</button>
-                <button class="text-btn" id="anotherBtn">Compress Another</button>
+                <button class="btn-ghost" id="shareBtn">Share</button>
+                <button class="btn-text" id="anotherBtn">Compress another</button>
             </div>
         </div>
     </div>
