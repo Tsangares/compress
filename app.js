@@ -1,5 +1,6 @@
-import { FFmpeg } from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
-import { fetchFile, toBlobURL } from 'https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js';
+// FFmpeg loaded via UMD <script> tags — globals available
+const { FFmpeg } = FFmpegWASM;
+const { fetchFile, toBlobURL } = FFmpegUtil;
 
 // ============================================
 // State
@@ -12,8 +13,11 @@ const state = {
     quality: 'medium',
     ffmpeg: null,
     ffmpegLoaded: false,
+    ffmpegLoading: false,
     outputBlob: null,
     currentScreen: 0,
+    fileWritten: false,
+    inputName: null,
 };
 
 const QUALITY_PRESETS = {
@@ -55,6 +59,7 @@ const screens = {
     options: $('#screen-options'),
     progress: $('#screen-progress'),
     done: $('#screen-done'),
+    about: $('#screen-about'),
 };
 
 const dom = {
@@ -79,13 +84,19 @@ const dom = {
     anotherBtn: $('#anotherBtn'),
     loadingBar: $('#loading-bar'),
     loadingBarFill: $('.engine-loader-fill'),
+    aboutBtn: $('#aboutBtn'),
+    estQuick: $('#estQuick'),
+    estAdvanced: $('#estAdvanced'),
+    estTestedRow: $('#estTestedRow'),
+    estTesting: $('#estTesting'),
+    testEstimate: $('#testEstimate'),
 };
 
 // ============================================
 // Screen Navigation
 // ============================================
 function goToScreen(index) {
-    const list = [screens.select, screens.options, screens.progress, screens.done];
+    const list = [screens.select, screens.options, screens.progress, screens.done, screens.about];
     state.currentScreen = index;
 
     list.forEach((s, i) => {
@@ -103,6 +114,7 @@ function goToScreen(index) {
 function handleFile(file) {
     if (!file || !file.type.startsWith('video/')) return;
     state.file = file;
+    state.fileWritten = false;
 
     const url = URL.createObjectURL(file);
     dom.preview.src = url;
@@ -116,6 +128,11 @@ function handleFile(file) {
         dom.infoSize.textContent = formatBytes(file.size);
         dom.infoDuration.textContent = formatDuration(state.duration);
         dom.infoRes.textContent = `${state.width}x${state.height}`;
+
+        // Reset estimation
+        dom.estTestedRow.classList.add('hidden');
+        dom.estTesting.classList.add('hidden');
+        updateQuickEstimate();
 
         goToScreen(1);
     };
@@ -143,7 +160,7 @@ dom.fileInput.addEventListener('change', (e) => {
 });
 
 // ============================================
-// Quality Selector (pills instead of segmented)
+// Quality Selector
 // ============================================
 const pills = dom.qualityControl.querySelectorAll('.pill');
 
@@ -156,28 +173,141 @@ pills.forEach((btn) => {
         const preset = QUALITY_PRESETS[state.quality];
         dom.qualityDesc.textContent = preset.desc;
 
+        // Reset tested estimate when quality changes
+        dom.estTestedRow.classList.add('hidden');
+        dom.estTesting.classList.add('hidden');
+        updateQuickEstimate();
+
         if (navigator.vibrate) navigator.vibrate(5);
     });
 });
 
 // ============================================
+// Estimation — Quick
+// ============================================
+function updateQuickEstimate() {
+    if (!state.file) return;
+
+    const est = quickEstimate(state.file.size, state.duration, state.height, state.quality);
+    dom.estQuick.textContent = `~${formatBytes(est)}`;
+}
+
+function quickEstimate(fileSize, duration, height, quality) {
+    if (quality === 'target') {
+        return 10 * 1024 * 1024;
+    }
+
+    // Estimate output bitrate based on typical CRF results for resolution
+    const h = Math.max(height, 480);
+    const typicalKbps = {
+        high:   h > 1080 ? 14000 : h > 720 ? 5500 : h > 480 ? 2800 : 1400,
+        medium: h > 1080 ? 6000  : h > 720 ? 2500 : h > 480 ? 1200 : 600,
+        low:    h > 1080 ? 2000  : h > 720 ? 800  : h > 480 ? 450  : 250,
+    };
+
+    const inputKbps = (fileSize * 8) / duration / 1000;
+    const audioKbps = quality === 'high' ? 128 : quality === 'medium' ? 96 : 64;
+
+    // Output can't exceed input
+    const videoKbps = Math.min(typicalKbps[quality], inputKbps * 0.9);
+    const totalKbps = videoKbps + audioKbps;
+
+    return (totalKbps * 1000 / 8) * duration;
+}
+
+// ============================================
+// Estimation — Advanced (sample test)
+// ============================================
+dom.testEstimate.addEventListener('click', runAdvancedEstimate);
+
+async function runAdvancedEstimate() {
+    if (!state.file || !state.ffmpegLoaded) {
+        if (!state.ffmpegLoaded) {
+            await loadFFmpeg();
+            if (!state.ffmpegLoaded) return;
+        }
+    }
+
+    dom.testEstimate.disabled = true;
+    dom.estTesting.classList.remove('hidden');
+    dom.estTestedRow.classList.add('hidden');
+
+    const ffmpeg = state.ffmpeg;
+    const preset = QUALITY_PRESETS[state.quality];
+    const inputName = 'input' + getExtension(state.file.name);
+    const sampleRaw = 'sample_raw.mp4';
+    const sampleOut = 'sample_out.mp4';
+
+    try {
+        // Write full file to FS if not already there
+        if (!state.fileWritten) {
+            await ffmpeg.writeFile(inputName, await fetchFile(state.file));
+            state.fileWritten = true;
+            state.inputName = inputName;
+        }
+
+        // Extract a sample clip from the middle (3 seconds, or full video if < 6s)
+        const sampleDuration = Math.min(3, state.duration * 0.8);
+        const seekPoint = Math.max(0, (state.duration / 2) - (sampleDuration / 2));
+
+        await ffmpeg.exec([
+            '-ss', String(seekPoint),
+            '-i', inputName,
+            '-t', String(sampleDuration),
+            '-c', 'copy',
+            '-y', sampleRaw,
+        ]);
+
+        // Read sample to get raw size
+        const rawData = await ffmpeg.readFile(sampleRaw);
+        const rawSize = rawData.length;
+
+        // Compress the sample with current quality settings
+        const args = buildFFmpegArgs(sampleRaw, sampleOut, preset);
+        await ffmpeg.exec(args);
+
+        // Read compressed sample
+        const outData = await ffmpeg.readFile(sampleOut);
+        const outSize = outData.length;
+
+        // Calculate ratio and extrapolate
+        const ratio = outSize / rawSize;
+        const estimatedTotal = state.file.size * ratio;
+
+        dom.estAdvanced.textContent = `~${formatBytes(estimatedTotal)}`;
+        dom.estTestedRow.classList.remove('hidden');
+
+        // Clean up temp files
+        await ffmpeg.deleteFile(sampleRaw).catch(() => {});
+        await ffmpeg.deleteFile(sampleOut).catch(() => {});
+
+    } catch (err) {
+        console.error('Advanced estimate failed:', err);
+        dom.estAdvanced.textContent = 'Error';
+        dom.estTestedRow.classList.remove('hidden');
+    }
+
+    dom.estTesting.classList.add('hidden');
+    dom.testEstimate.disabled = false;
+}
+
+// ============================================
 // FFmpeg Loading
 // ============================================
 async function loadFFmpeg() {
-    if (state.ffmpegLoaded || state.ffmpeg) return;
+    if (state.ffmpegLoaded || state.ffmpegLoading) return;
+    state.ffmpegLoading = true;
 
     state.ffmpeg = new FFmpeg();
     dom.loadingBar.classList.remove('hidden');
 
     try {
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-
         dom.loadingBarFill.style.width = '10%';
 
-        const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
+        const coreURL = await toBlobURL('lib/ffmpeg-core.js', 'text/javascript');
         dom.loadingBarFill.style.width = '40%';
 
-        const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+        const wasmURL = await toBlobURL('lib/ffmpeg-core.wasm', 'application/wasm');
         dom.loadingBarFill.style.width = '80%';
 
         await state.ffmpeg.load({ coreURL, wasmURL });
@@ -191,7 +321,8 @@ async function loadFFmpeg() {
     } catch (err) {
         console.error('Failed to load FFmpeg:', err);
         dom.loadingBar.querySelector('.engine-loader-label').textContent =
-            'Failed to load engine. Please refresh.';
+            'Failed to load engine. Refresh to retry.';
+        state.ffmpegLoading = false;
     }
 }
 
@@ -201,15 +332,15 @@ async function loadFFmpeg() {
 dom.compressBtn.addEventListener('click', startCompression);
 
 async function startCompression() {
-    if (!state.file || !state.ffmpegLoaded) {
-        if (!state.ffmpegLoaded) {
-            dom.compressBtn.disabled = true;
-            dom.compressBtn.querySelector('span').textContent = 'Loading...';
-            await loadFFmpeg();
-            dom.compressBtn.disabled = false;
-            dom.compressBtn.querySelector('span').textContent = 'Compress';
-        }
-        return;
+    if (!state.file) return;
+
+    if (!state.ffmpegLoaded) {
+        dom.compressBtn.disabled = true;
+        dom.compressBtn.querySelector('span').textContent = 'Loading...';
+        await loadFFmpeg();
+        dom.compressBtn.disabled = false;
+        dom.compressBtn.querySelector('span').textContent = 'Compress';
+        if (!state.ffmpegLoaded) return;
     }
 
     goToScreen(2);
@@ -228,7 +359,12 @@ async function startCompression() {
         dom.progressStatus.textContent = 'Writing file...';
         updateProgress(0);
 
-        await ffmpeg.writeFile(inputName, await fetchFile(state.file));
+        // Reuse file if already written (from estimation)
+        if (!state.fileWritten || state.inputName !== inputName) {
+            await ffmpeg.writeFile(inputName, await fetchFile(state.file));
+            state.fileWritten = true;
+            state.inputName = inputName;
+        }
 
         dom.progressStatus.textContent = 'Compressing...';
 
@@ -241,8 +377,9 @@ async function startCompression() {
         const data = await ffmpeg.readFile(outputName);
         state.outputBlob = new Blob([data.buffer], { type: 'video/mp4' });
 
-        await ffmpeg.deleteFile(inputName);
-        await ffmpeg.deleteFile(outputName);
+        await ffmpeg.deleteFile(inputName).catch(() => {});
+        await ffmpeg.deleteFile(outputName).catch(() => {});
+        state.fileWritten = false;
 
         updateProgress(100);
         showDone();
@@ -292,14 +429,14 @@ function buildFFmpegArgs(input, output, preset) {
         '-c:a', 'aac',
         '-b:a', preset.audioBitrate,
         '-movflags', '+faststart',
-        output
+        '-y', output
     );
 
     return args;
 }
 
 function updateProgress(pct) {
-    const circumference = 2 * Math.PI * 68; // r=68
+    const circumference = 2 * Math.PI * 68;
     const offset = circumference - (pct / 100) * circumference;
     dom.progressRing.style.strokeDashoffset = offset;
     dom.progressPercent.textContent = pct;
@@ -350,6 +487,7 @@ dom.anotherBtn.addEventListener('click', () => {
     state.file = null;
     state.outputBlob = null;
     state.duration = 0;
+    state.fileWritten = false;
     dom.preview.src = '';
     dom.fileInput.value = '';
     goToScreen(0);
@@ -364,6 +502,13 @@ document.querySelectorAll('[data-back]').forEach(btn => {
     btn.addEventListener('click', () => {
         if (state.currentScreen > 0) goToScreen(state.currentScreen - 1);
     });
+});
+
+// About navigation
+dom.aboutBtn.addEventListener('click', () => goToScreen(4));
+
+document.querySelectorAll('[data-back-home]').forEach(btn => {
+    btn.addEventListener('click', () => goToScreen(0));
 });
 
 // ============================================

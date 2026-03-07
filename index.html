@@ -11,7 +11,6 @@
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
     <link rel="apple-touch-icon" href="icon-192.png">
-    <link rel="preconnect" href="https://unpkg.com">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -42,6 +41,8 @@
                         <span class="picker-sub">or drop it here</span>
                     </div>
                 </label>
+
+                <button class="about-link" id="aboutBtn">About this app</button>
             </div>
 
             <div id="loading-bar" class="engine-loader hidden">
@@ -90,6 +91,35 @@
                         <button class="pill accent" data-quality="target">&lt; 10 MB</button>
                     </div>
                     <p class="quality-hint" id="qualityDesc">Good balance of quality and file size. ~60% smaller.</p>
+                </div>
+
+                <!-- Estimation -->
+                <div class="estimate-section">
+                    <div class="estimate-row">
+                        <div class="estimate-info">
+                            <span class="estimate-label">Quick estimate</span>
+                            <span class="estimate-value" id="estQuick">--</span>
+                        </div>
+                        <span class="estimate-tag">rough</span>
+                    </div>
+
+                    <button class="btn-test" id="testEstimate">
+                        <svg viewBox="0 0 20 20" fill="none"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        Test with sample
+                    </button>
+
+                    <div class="estimate-row tested hidden" id="estTestedRow">
+                        <div class="estimate-info">
+                            <span class="estimate-label">Tested estimate</span>
+                            <span class="estimate-value" id="estAdvanced">--</span>
+                        </div>
+                        <span class="estimate-tag good">tested</span>
+                    </div>
+
+                    <div class="estimate-testing hidden" id="estTesting">
+                        <div class="mini-spinner"></div>
+                        <span>Encoding sample...</span>
+                    </div>
                 </div>
             </div>
 
@@ -170,8 +200,51 @@
                 <button class="btn-text" id="anotherBtn">Compress another</button>
             </div>
         </div>
+
+        <!-- Screen 5: About -->
+        <div id="screen-about" class="screen" data-screen="4">
+            <div class="screen-nav">
+                <button class="nav-back" data-back-home>
+                    <svg viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <span class="nav-title">About</span>
+                <div class="nav-spacer"></div>
+            </div>
+
+            <div class="screen-inner scroll-y">
+                <div class="about-content">
+                    <h2>No ads. No tracking.<br>No cloud.</h2>
+
+                    <p>Your video never leaves your device. We compress it right here, in your browser, using FFmpeg compiled to WebAssembly.</p>
+
+                    <p>Why? Because compression is solved. FFmpeg has been doing this for 25 years. There's no reason to upload your private videos to some server, wait in a queue, and download a watermarked result.</p>
+
+                    <div class="about-divider"></div>
+
+                    <h3>How it works</h3>
+                    <p>FFmpeg.wasm runs entirely in your browser. The ~30 MB engine downloads once and gets cached. After that, compression works offline.</p>
+
+                    <p>No account. No login. No "premium tier." No "3 free conversions." Just pick a video and compress it.</p>
+
+                    <div class="about-divider"></div>
+
+                    <h3>Open source</h3>
+                    <p>Every line of code is public. Audit it yourself.</p>
+                    <a href="https://github.com/Tsangares/compress" target="_blank" rel="noopener" class="about-link-ext">
+                        View source on GitHub
+                        <svg viewBox="0 0 20 20" fill="none"><path d="M6 14L14 6M14 6H8M14 6v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </a>
+
+                    <div class="about-footer">
+                        <p>Built with FFmpeg, spite for ads, and a belief that tools should be free.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
+    <script src="lib/ffmpeg.js"></script>
+    <script src="lib/util.js"></script>
     <script type="module" src="app.js"></script>
 </body>
 </html>
