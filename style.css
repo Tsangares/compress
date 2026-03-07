@@ -1,0 +1,740 @@
+/* ============================================
+   Compress — Native App Feel
+   ============================================ */
+
+:root {
+    --bg: #0a0a0f;
+    --surface: #141419;
+    --surface-2: #1c1c24;
+    --border: rgba(255, 255, 255, 0.06);
+    --text: #f0f0f5;
+    --text-secondary: #8888aa;
+    --text-tertiary: #555566;
+    --accent: #6366f1;
+    --accent-light: #818cf8;
+    --accent-glow: rgba(99, 102, 241, 0.2);
+    --success: #22c55e;
+    --success-glow: rgba(34, 197, 94, 0.15);
+    --danger: #ef4444;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --radius-full: 9999px;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-top: env(safe-area-inset-top, 0px);
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* ---- Reset & Base ---- */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
+}
+
+body {
+    position: fixed;
+    width: 100%;
+}
+
+#app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+}
+
+/* Disable text selection on UI elements */
+button, label, .segmented-control, .info-chip, .file-drop-zone, .screen-header, .option-label {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* ---- Screen System ---- */
+.screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    opacity: 0;
+    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform, opacity;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+.screen.active {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.screen.exit-left {
+    transform: translateX(-30%);
+    opacity: 0.5;
+}
+
+/* ---- Screen Header ---- */
+.screen-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    padding-top: calc(12px + var(--safe-top));
+    min-height: 56px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(10, 10, 15, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+}
+
+.screen-header h2 {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.spacer {
+    width: 40px;
+}
+
+/* ---- Back Button ---- */
+.back-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: none;
+    color: var(--accent-light);
+    cursor: pointer;
+    border-radius: var(--radius-full);
+    transition: background 0.2s;
+}
+
+.back-btn:active {
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.back-btn svg {
+    width: 24px;
+    height: 24px;
+}
+
+/* ---- Screen Content ---- */
+.screen-content {
+    flex: 1;
+    padding: 0 20px;
+    padding-bottom: 20px;
+}
+
+.center-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+}
+
+/* ---- Screen Footer ---- */
+.screen-footer {
+    padding: 16px 20px;
+    padding-bottom: calc(16px + var(--safe-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
+    position: sticky;
+    bottom: 0;
+}
+
+/* ============================================
+   Screen 1: Select Video
+   ============================================ */
+
+#screen-select .screen-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    padding-top: calc(60px + var(--safe-top));
+}
+
+.hero-section {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.app-icon {
+    width: 72px;
+    height: 72px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    border-radius: var(--radius-xl);
+    color: white;
+    margin-bottom: 8px;
+    box-shadow: 0 8px 32px rgba(99, 102, 241, 0.3);
+}
+
+.app-icon svg {
+    width: 40px;
+    height: 40px;
+}
+
+.hero-section h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+/* ---- Drop Zone ---- */
+.file-drop-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 340px;
+    aspect-ratio: 16 / 10;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-xl);
+    cursor: pointer;
+    transition: border-color 0.3s, background 0.3s, transform 0.15s;
+    background: var(--surface);
+}
+
+.file-drop-zone:active {
+    transform: scale(0.97);
+    border-color: var(--accent);
+    background: var(--accent-glow);
+}
+
+.file-drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+    border-style: solid;
+}
+
+.drop-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.drop-icon {
+    width: 48px;
+    height: 48px;
+    color: var(--accent-light);
+}
+
+.drop-text {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.drop-hint {
+    font-size: 13px;
+    color: var(--text-tertiary);
+}
+
+/* ---- Loading Bar ---- */
+.loading-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 16px 20px;
+    padding-bottom: calc(16px + var(--safe-bottom));
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+.loading-bar.hidden {
+    opacity: 0;
+    transform: translateY(20px);
+    pointer-events: none;
+}
+
+.loading-bar-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    text-align: center;
+}
+
+.loading-bar-track {
+    height: 4px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.loading-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-light));
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+
+/* ============================================
+   Screen 2: Options
+   ============================================ */
+
+.preview-container {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    margin-bottom: 16px;
+}
+
+.preview-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+}
+
+/* ---- File Info Chips ---- */
+.file-info {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.info-chip {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 8px;
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+}
+
+.info-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    font-weight: 500;
+}
+
+.info-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* ---- Option Section ---- */
+.option-section {
+    margin-bottom: 12px;
+}
+
+.option-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+    display: block;
+}
+
+/* ---- Segmented Control ---- */
+.segmented-control {
+    display: flex;
+    position: relative;
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    padding: 3px;
+    border: 1px solid var(--border);
+}
+
+.seg-btn {
+    flex: 1;
+    padding: 10px 4px;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: calc(var(--radius-md) - 3px);
+    transition: color 0.25s;
+    position: relative;
+    z-index: 1;
+    font-family: var(--font);
+    white-space: nowrap;
+}
+
+.seg-btn.active {
+    color: var(--text);
+}
+
+.seg-indicator {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 3px;
+    width: calc(25% - 3px);
+    background: var(--surface-2);
+    border-radius: calc(var(--radius-md) - 3px);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* ---- Quality Description ---- */
+.quality-description {
+    padding: 12px 16px;
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+}
+
+.quality-description p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+/* ============================================
+   Buttons
+   ============================================ */
+
+.action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 16px 24px;
+    border: none;
+    border-radius: var(--radius-lg);
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    color: white;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: transform 0.15s, box-shadow 0.15s;
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.3);
+}
+
+.action-btn:active {
+    transform: scale(0.97);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+
+.action-btn:disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.btn-icon {
+    width: 20px;
+    height: 20px;
+}
+
+.secondary-btn {
+    width: 100%;
+    padding: 14px 24px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: transform 0.15s, background 0.2s;
+}
+
+.secondary-btn:active {
+    transform: scale(0.97);
+    background: var(--surface-2);
+}
+
+.text-btn {
+    width: 100%;
+    padding: 12px 24px;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: color 0.2s;
+}
+
+.text-btn:active {
+    color: var(--text);
+}
+
+.cancel-btn {
+    width: 100%;
+    padding: 14px 24px;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-lg);
+    background: rgba(239, 68, 68, 0.08);
+    color: var(--danger);
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: transform 0.15s, background 0.2s;
+}
+
+.cancel-btn:active {
+    transform: scale(0.97);
+    background: rgba(239, 68, 68, 0.15);
+}
+
+/* ============================================
+   Screen 3: Progress
+   ============================================ */
+
+.progress-ring-container {
+    position: relative;
+    width: 180px;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.progress-ring {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.progress-ring-bg {
+    fill: none;
+    stroke: var(--surface-2);
+    stroke-width: 6;
+}
+
+.progress-ring-fill {
+    fill: none;
+    stroke: url(#progressGradient);
+    stroke-width: 6;
+    stroke-linecap: round;
+    stroke-dasharray: 439.82;
+    stroke-dashoffset: 439.82;
+    transition: stroke-dashoffset 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.progress-text {
+    position: absolute;
+    display: flex;
+    align-items: baseline;
+    gap: 2px;
+}
+
+.progress-percent {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.progress-unit {
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.progress-status {
+    font-size: 15px;
+    color: var(--text-secondary);
+}
+
+/* ============================================
+   Screen 4: Done
+   ============================================ */
+
+.done-check {
+    width: 80px;
+    height: 80px;
+    color: var(--success);
+    animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.done-check svg {
+    width: 100%;
+    height: 100%;
+}
+
+.comparison {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 280px;
+}
+
+.compare-row {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+}
+
+.compare-row.highlight {
+    border-color: rgba(34, 197, 94, 0.3);
+    background: var(--success-glow);
+}
+
+.compare-label {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.compare-value {
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.compare-row.highlight .compare-value {
+    color: var(--success);
+}
+
+.compare-arrow {
+    width: 24px;
+    height: 24px;
+    color: var(--text-tertiary);
+}
+
+.compare-arrow svg {
+    width: 100%;
+    height: 100%;
+}
+
+.compare-savings {
+    margin-top: 4px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--success);
+}
+
+/* ============================================
+   Animations
+   ============================================ */
+
+@keyframes popIn {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* ============================================
+   Desktop Enhancements
+   ============================================ */
+
+@media (min-width: 640px) {
+    #app {
+        max-width: 480px;
+        margin: 0 auto;
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+    }
+
+    .file-drop-zone:hover {
+        border-color: var(--accent);
+        background: var(--accent-glow);
+    }
+
+    .action-btn:hover {
+        box-shadow: 0 6px 24px rgba(99, 102, 241, 0.4);
+    }
+
+    .secondary-btn:hover {
+        background: var(--surface-2);
+    }
+}
+
+/* ============================================
+   Scrollbar (hidden on mobile, subtle on desktop)
+   ============================================ */
+
+.screen::-webkit-scrollbar {
+    width: 0;
+}
+
+@media (min-width: 640px) {
+    .screen::-webkit-scrollbar {
+        width: 4px;
+    }
+    .screen::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .screen::-webkit-scrollbar-thumb {
+        background: var(--surface-2);
+        border-radius: 2px;
+    }
+}
+
+/* ============================================
+   Utilities
+   ============================================ */
+
+.hidden {
+    display: none !important;
+}

@@ -1,0 +1,38 @@
+{
+    "name": "Compress",
+    "short_name": "Compress",
+    "description": "Compress videos on your device. No uploads, no servers.",
+    "start_url": "/",
+    "display": "standalone",
+    "orientation": "any",
+    "background_color": "#0a0a0f",
+    "theme_color": "#0a0a0f",
+    "icons": [
+        {
+            "src": "icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": ["utilities", "productivity"],
+    "share_target": {
+        "action": "/",
+        "method": "POST",
+        "enctype": "multipart/form-data",
+        "params": {
+            "files": [
+                {
+                    "name": "video",
+                    "accept": ["video/*"]
+                }
+            ]
+        }
+    }
+}
