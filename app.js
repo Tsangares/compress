@@ -18,6 +18,8 @@ const state = {
     currentScreen: 0,
     fileWritten: false,
     inputName: null,
+    wakeLock: null,
+    compressing: false,
 };
 
 const QUALITY_PRESETS = {
@@ -82,14 +84,19 @@ const dom = {
     saveBtn: $('#saveBtn'),
     shareBtn: $('#shareBtn'),
     anotherBtn: $('#anotherBtn'),
-    loadingBar: $('#loading-bar'),
-    loadingBarFill: $('.engine-loader-fill'),
+    engineStatus: $('#engineStatus'),
+    engineFill: $('#engineFill'),
+    engineLabel: $('#engineStatus .engine-label'),
     aboutBtn: $('#aboutBtn'),
     estQuick: $('#estQuick'),
     estAdvanced: $('#estAdvanced'),
     estTestedRow: $('#estTestedRow'),
     estTesting: $('#estTesting'),
     testEstimate: $('#testEstimate'),
+    resumeCard: $('#resumeCard'),
+    resumeName: $('#resumeName'),
+    resumeMeta: $('#resumeMeta'),
+    resumeBtn: $('#resumeBtn'),
 };
 
 // ============================================
@@ -110,7 +117,20 @@ function goToScreen(index, pushHistory = true) {
         history.pushState({ screen: index }, '');
     }
 
+    // Show resume card on home screen if a file is loaded
+    updateResumeCard(index);
+
     if (navigator.vibrate) navigator.vibrate(10);
+}
+
+function updateResumeCard(screenIndex) {
+    if (screenIndex === 0 && state.file) {
+        dom.resumeName.textContent = state.file.name;
+        dom.resumeMeta.textContent = `${formatBytes(state.file.size)} · ${state.width}x${state.height}`;
+        dom.resumeCard.classList.remove('hidden');
+    } else {
+        dom.resumeCard.classList.add('hidden');
+    }
 }
 
 // System back button / swipe-back gesture
@@ -157,8 +177,6 @@ function handleFile(file) {
 
         goToScreen(1);
     };
-
-    loadFFmpeg();
 }
 
 // Drag & drop
@@ -242,15 +260,14 @@ function quickEstimate(fileSize, duration, height, quality) {
 dom.testEstimate.addEventListener('click', runAdvancedEstimate);
 
 async function runAdvancedEstimate() {
-    if (!state.file || !state.ffmpegLoaded) {
-        if (!state.ffmpegLoaded) {
-            setTestStatus('Loading engine...');
-            await loadFFmpeg();
-            if (!state.ffmpegLoaded) {
-                setTestStatus(null);
-                return;
-            }
-        }
+    if (!state.file) return;
+    if (!state.ffmpegLoaded) {
+        dom.testEstimate.disabled = true;
+        dom.testEstimate.textContent = 'Loading engine...';
+        await loadFFmpeg();
+        dom.testEstimate.disabled = false;
+        dom.testEstimate.innerHTML = '<svg viewBox="0 0 20 20" fill="none"><path d="M10 3v14M3 10h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Test with sample';
+        if (!state.ffmpegLoaded) return;
     }
 
     // Lock UI
@@ -387,31 +404,65 @@ async function loadFFmpeg() {
     state.ffmpegLoading = true;
 
     state.ffmpeg = new FFmpeg();
-    dom.loadingBar.classList.remove('hidden');
 
     try {
-        dom.loadingBarFill.style.width = '10%';
+        dom.engineLabel.textContent = 'Loading engine...';
+        dom.engineFill.style.width = '10%';
 
         const coreURL = await toBlobURL('lib/ffmpeg-core.js', 'text/javascript');
-        dom.loadingBarFill.style.width = '40%';
+        dom.engineFill.style.width = '40%';
 
         const wasmURL = await toBlobURL('lib/ffmpeg-core.wasm', 'application/wasm');
-        dom.loadingBarFill.style.width = '80%';
+        dom.engineFill.style.width = '80%';
 
         await state.ffmpeg.load({ coreURL, wasmURL });
-        dom.loadingBarFill.style.width = '100%';
+        dom.engineFill.style.width = '100%';
 
         state.ffmpegLoaded = true;
-
-        setTimeout(() => {
-            dom.loadingBar.classList.add('hidden');
-        }, 500);
+        dom.engineLabel.textContent = 'Engine ready';
+        dom.engineStatus.classList.add('ready');
     } catch (err) {
         console.error('Failed to load FFmpeg:', err);
-        dom.loadingBar.querySelector('.engine-loader-label').textContent =
-            'Failed to load engine. Refresh to retry.';
+        dom.engineLabel.textContent = 'Engine failed — refresh to retry';
         state.ffmpegLoading = false;
     }
+}
+
+// ============================================
+// Background Support (Wake Lock + Notifications)
+// ============================================
+async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try {
+        state.wakeLock = await navigator.wakeLock.request('screen');
+        state.wakeLock.addEventListener('release', () => { state.wakeLock = null; });
+    } catch (e) {
+        // Wake lock can fail if tab is hidden at request time — non-critical
+    }
+}
+
+function releaseWakeLock() {
+    if (state.wakeLock) {
+        state.wakeLock.release().catch(() => {});
+        state.wakeLock = null;
+    }
+}
+
+// Re-acquire wake lock when tab becomes visible again (browser releases it on hide)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.compressing) {
+        acquireWakeLock();
+    }
+});
+
+function notifyCompletion(savings) {
+    if (document.visibilityState === 'visible') return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    new Notification('Compression complete', {
+        body: `Your video is ${savings}% smaller. Tap to save.`,
+        icon: 'icon-192.png',
+        tag: 'compress-done',
+    });
 }
 
 // ============================================
@@ -431,6 +482,13 @@ async function startCompression() {
         if (!state.ffmpegLoaded) return;
     }
 
+    // Request notification permission early (requires user gesture)
+    if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+
+    state.compressing = true;
+    await acquireWakeLock();
     goToScreen(2);
 
     const ffmpeg = state.ffmpeg;
@@ -446,7 +504,8 @@ async function startCompression() {
         if (pct > 3) {
             const elapsed = (Date.now() - compressStart) / 1000;
             const eta = Math.round((elapsed / pct) * (100 - pct));
-            dom.progressStatus.textContent = `Compressing... ~${eta}s left`;
+            const bgLabel = document.hidden ? ' (background)' : '';
+            dom.progressStatus.textContent = `Compressing...${bgLabel} ~${eta}s left`;
         }
     };
     ffmpeg.on('progress', progressHandler);
@@ -487,6 +546,9 @@ async function startCompression() {
         console.error('Compression failed:', err);
         dom.progressStatus.textContent = 'Error: ' + err.message;
     }
+
+    state.compressing = false;
+    releaseWakeLock();
 }
 
 function buildFFmpegArgs(input, output, preset) {
@@ -605,6 +667,7 @@ function showDone(encodeTimeSec) {
     explainer += ' Container uses "faststart" flag to move the moov atom to the front, allowing playback to begin before the full file downloads.';
     s('statExplainer', explainer);
 
+    notifyCompletion(savings);
     if (navigator.vibrate) navigator.vibrate([50, 50, 100]);
     goToScreen(3);
 }
@@ -643,6 +706,8 @@ dom.anotherBtn.addEventListener('click', () => {
     state.file = null;
     state.outputBlob = null;
     state.duration = 0;
+    state.width = 0;
+    state.height = 0;
     state.fileWritten = false;
     dom.preview.src = '';
     dom.fileInput.value = '';
@@ -665,6 +730,11 @@ dom.aboutBtn.addEventListener('click', () => goToScreen(4));
 
 document.querySelectorAll('[data-back-home]').forEach(btn => {
     btn.addEventListener('click', () => goToScreen(0));
+});
+
+// Resume — go back to options with previously loaded file
+dom.resumeBtn.addEventListener('click', () => {
+    if (state.file) goToScreen(1);
 });
 
 // ============================================
@@ -701,3 +771,6 @@ window.addEventListener('beforeinstallprompt', (e) => {
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+// Preload FFmpeg WASM immediately — don't wait for file selection
+loadFFmpeg();

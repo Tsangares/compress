@@ -1,4 +1,4 @@
-const CACHE_NAME = 'compress-v3';
+const CACHE_NAME = 'compress-v5';
 const STATIC_ASSETS = [
     '/',
     '/index.html',

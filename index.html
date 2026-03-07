@@ -45,9 +45,19 @@
                 <button class="about-link" id="aboutBtn">About this app</button>
             </div>
 
-            <div id="loading-bar" class="engine-loader hidden">
-                <div class="engine-loader-label">Loading engine</div>
-                <div class="engine-loader-track"><div class="engine-loader-fill"></div></div>
+            <!-- Resume card (shown when back with a file loaded) -->
+            <div id="resumeCard" class="resume-card hidden">
+                <div class="resume-info">
+                    <span class="resume-name" id="resumeName">video.mp4</span>
+                    <span class="resume-meta" id="resumeMeta">12.3 MB</span>
+                </div>
+                <button class="resume-btn" id="resumeBtn">Continue</button>
+            </div>
+
+            <div id="engineStatus" class="engine-status">
+                <div class="engine-dot"></div>
+                <span class="engine-label">Loading engine...</span>
+                <div class="engine-progress"><div class="engine-progress-fill" id="engineFill"></div></div>
             </div>
         </div>
 

@@ -291,47 +291,132 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     color: var(--text-3);
 }
 
-/* ---- Engine loader ---- */
-.engine-loader {
+/* ---- Engine status chip ---- */
+.engine-status {
     position: absolute;
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 16px 24px;
-    padding-bottom: calc(16px + var(--safe-b));
-    transition: opacity 0.3s, transform 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 24px;
+    padding-bottom: calc(14px + var(--safe-b));
+    transition: opacity 0.4s;
 }
 
-.engine-loader.hidden {
+.engine-status.ready {
     opacity: 0;
-    transform: translateY(16px);
     pointer-events: none;
+    transition-delay: 1.5s;
 }
 
-.engine-loader-label {
+.engine-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse-dot 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+.engine-status.ready .engine-dot {
+    background: var(--success);
+    animation: none;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
+.engine-label {
     font-size: 12px;
     color: var(--text-3);
-    text-align: center;
-    margin-bottom: 8px;
     font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    flex-shrink: 0;
 }
 
-.engine-loader-track {
+.engine-progress {
+    flex: 1;
     height: 3px;
     background: var(--surface-dim);
     border-radius: 2px;
     overflow: hidden;
 }
 
-.engine-loader-fill {
+.engine-progress-fill {
     height: 100%;
     width: 0%;
     background: var(--accent);
     border-radius: 2px;
     transition: width 0.4s var(--ease);
 }
+
+.engine-status.ready .engine-progress {
+    display: none;
+}
+
+/* ---- Resume card ---- */
+.resume-card {
+    position: absolute;
+    bottom: 60px;
+    left: 24px;
+    right: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border-radius: var(--r);
+    box-shadow: var(--shadow-lg);
+    border: 1.5px solid var(--border-strong);
+    animation: slideUp 0.35s var(--spring);
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.resume-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.resume-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.resume-meta {
+    font-size: 12px;
+    color: var(--text-3);
+    font-weight: 500;
+}
+
+.resume-btn {
+    padding: 8px 18px;
+    border: none;
+    border-radius: var(--r-full);
+    background: var(--text);
+    color: var(--surface);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.2s var(--spring);
+}
+
+.resume-btn:active { transform: scale(0.94); }
 
 /* ======================================================
    Screen 2 — Options
