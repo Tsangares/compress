@@ -1,10 +1,7 @@
-const CACHE_NAME = 'compress-v5';
-const STATIC_ASSETS = [
-    '/',
-    '/index.html',
-    '/style.css',
-    '/app.js',
-    '/manifest.json',
+const CACHE_NAME = 'compress-v6';
+
+// Large files that rarely change — cache-first (avoid re-downloading 31MB WASM)
+const CACHE_FIRST = [
     '/lib/ffmpeg.js',
     '/lib/814.ffmpeg.js',
     '/lib/util.js',
@@ -12,10 +9,21 @@ const STATIC_ASSETS = [
     '/lib/ffmpeg-core.wasm',
 ];
 
-// Install: cache static assets
+// App files — network-first (always get fresh, fall back to cache offline)
+const NETWORK_FIRST = [
+    '/',
+    '/index.html',
+    '/style.css',
+    '/app.js',
+    '/manifest.json',
+];
+
+// Install: pre-cache everything
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+        caches.open(CACHE_NAME).then((cache) =>
+            cache.addAll([...CACHE_FIRST, ...NETWORK_FIRST])
+        )
     );
     self.skipWaiting();
 });
@@ -32,11 +40,16 @@ self.addEventListener('activate', (event) => {
     self.clients.claim();
 });
 
-// Fetch: cache-first for local assets
+// Fetch: network-first for app files, cache-first for lib files
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
+    if (url.origin !== self.location.origin) return;
 
-    if (url.origin === self.location.origin) {
+    const path = url.pathname;
+    const isCacheFirst = CACHE_FIRST.some((p) => path === p || path.startsWith('/lib/'));
+
+    if (isCacheFirst) {
+        // Cache-first: use cached WASM/lib, only fetch if not cached
         event.respondWith(
             caches.match(event.request).then((cached) =>
                 cached || fetch(event.request).then((response) => {
@@ -47,6 +60,17 @@ self.addEventListener('fetch', (event) => {
                     return response;
                 })
             )
+        );
+    } else {
+        // Network-first: always try fresh, fall back to cache
+        event.respondWith(
+            fetch(event.request).then((response) => {
+                if (response.ok) {
+                    const clone = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+                }
+                return response;
+            }).catch(() => caches.match(event.request))
         );
     }
 });
