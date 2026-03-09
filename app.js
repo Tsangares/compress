@@ -24,30 +24,30 @@ const state = {
 
 const QUALITY_PRESETS = {
     high: {
-        desc: 'Visually lossless. Slight file size reduction (~30% smaller).',
+        desc: 'Best quality, keeps full resolution. Larger output.',
         crf: 23,
-        preset: 'medium',
+        preset: 'ultrafast',
         audioBitrate: '128k',
         scale: null,
     },
     medium: {
-        desc: 'Good balance of quality and file size (~60% smaller).',
-        crf: 28,
-        preset: 'medium',
+        desc: 'Good quality at 720p. Fast encode, solid compression.',
+        crf: 26,
+        preset: 'ultrafast',
         audioBitrate: '96k',
-        scale: null,
-    },
-    low: {
-        desc: 'Smaller files, reduced quality. Good for messaging (~80% smaller).',
-        crf: 35,
-        preset: 'fast',
-        audioBitrate: '64k',
         scale: 720,
     },
+    low: {
+        desc: 'Smallest files at 480p. Best for messaging apps.',
+        crf: 32,
+        preset: 'ultrafast',
+        audioBitrate: '64k',
+        scale: 480,
+    },
     target: {
-        desc: 'Calculates the best settings to fit under 10 MB. May reduce resolution.',
+        desc: 'Fits under 10 MB. Adjusts quality and resolution automatically.',
         targetMB: 10,
-        preset: 'medium',
+        preset: 'ultrafast',
         audioBitrate: '64k',
     },
 };
