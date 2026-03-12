@@ -24,22 +24,22 @@ const state = {
 
 const QUALITY_PRESETS = {
     high: {
-        desc: 'Best quality, keeps full resolution. Larger output.',
+        desc: 'Minimal compression. Keeps full resolution and detail.',
         crf: 23,
         preset: 'ultrafast',
         audioBitrate: '128k',
         scale: null,
     },
     medium: {
-        desc: 'Good quality at 720p. Fast encode, solid compression.',
-        crf: 26,
+        desc: 'Strong compression at full resolution. Good for sharing.',
+        crf: 30,
         preset: 'ultrafast',
         audioBitrate: '96k',
-        scale: 720,
+        scale: null,
     },
     low: {
-        desc: 'Smallest files at 480p. Best for messaging apps.',
-        crf: 32,
+        desc: 'Maximum compression at 480p. Best for messaging apps.',
+        crf: 34,
         preset: 'ultrafast',
         audioBitrate: '64k',
         scale: 480,
@@ -236,16 +236,20 @@ function quickEstimate(fileSize, duration, height, quality) {
         return 10 * 1024 * 1024;
     }
 
-    // Estimate output bitrate based on typical CRF results for resolution
-    const h = Math.max(height, 480);
+    const preset = QUALITY_PRESETS[quality];
+    // Use output resolution after scaling, not input
+    const outHeight = (preset.scale && height > preset.scale) ? preset.scale : height;
+    const h = Math.max(outHeight, 480);
+
+    // Typical output bitrates for ultrafast at various CRFs and resolutions
     const typicalKbps = {
-        high:   h > 1080 ? 14000 : h > 720 ? 5500 : h > 480 ? 2800 : 1400,
-        medium: h > 1080 ? 6000  : h > 720 ? 2500 : h > 480 ? 1200 : 600,
-        low:    h > 1080 ? 2000  : h > 720 ? 800  : h > 480 ? 450  : 250,
+        high:   h > 1080 ? 12000 : h > 720 ? 5000 : h > 480 ? 2500 : 1200,
+        medium: h > 1080 ? 4000  : h > 720 ? 1800 : h > 480 ? 800  : 400,
+        low:    h > 1080 ? 1500  : h > 720 ? 600  : h > 480 ? 300  : 150,
     };
 
     const inputKbps = (fileSize * 8) / duration / 1000;
-    const audioKbps = quality === 'high' ? 128 : quality === 'medium' ? 96 : 64;
+    const audioKbps = parseInt(preset.audioBitrate) || 64;
 
     // Output can't exceed input
     const videoKbps = Math.min(typicalKbps[quality], inputKbps * 0.9);

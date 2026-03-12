@@ -289,6 +289,11 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
 .picker-sub {
     font-size: 13px;
     color: var(--text-3);
+    display: none;
+}
+
+@media (min-width: 640px) {
+    .picker-sub { display: block; }
 }
 
 /* ---- Engine status chip ---- */
