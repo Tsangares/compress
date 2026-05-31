@@ -2011,13 +2011,42 @@ function showEditDone() {
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
 
-    // Handle videos shared via share_target (from other apps)
+    // Legacy fallback: older WebAPKs (pre-v27 SW) still postMessage the file.
     navigator.serviceWorker.addEventListener('message', (event) => {
         if (event.data?.type === 'shared-video' && event.data.file) {
             handleFile(event.data.file);
         }
     });
 }
+
+// Pull a video shared via share_target. The SW (v27+) stashes the file in the
+// share cache and redirects here with ?shared=<id>; we fetch it on load. This
+// replaces the old postMessage push, which raced this listener and dropped
+// large shares onto a blank screen.
+async function consumeSharedVideo() {
+    const id = new URLSearchParams(location.search).get('shared');
+    if (!id || !/^[a-z0-9]{4,16}$/.test(id)) return;
+    history.replaceState(null, '', location.pathname);
+
+    urlDom.status.classList.remove('hidden', 'done', 'error');
+    urlDom.statusText.textContent = 'Loading shared video…';
+    try {
+        const resp = await fetch('/__share-probe/' + encodeURIComponent(id));
+        if (!resp.ok) throw new Error('Shared video expired — try sharing again');
+        const name = decodeURIComponent(resp.headers.get('X-Original-Name') || '') || 'shared-video.mp4';
+        const type = resp.headers.get('X-Original-Type') || 'video/mp4';
+        const blob = await resp.blob();
+        // Free the stashed copy immediately — a shared clip can be hundreds of MB.
+        caches.open('share-probe-v1').then((c) => c.delete('/__share-probe/' + id)).catch(() => {});
+        const file = new File([blob], name, { type: type.startsWith('video/') ? type : 'video/mp4' });
+        urlDom.status.classList.add('hidden');
+        handleFile(file);
+    } catch (err) {
+        urlDom.status.classList.add('error');
+        urlDom.statusText.textContent = err.message || 'Could not load shared video';
+    }
+}
+consumeSharedVideo();
 
 // Preload FFmpeg WASM immediately — don't wait for file selection
 loadFFmpeg();

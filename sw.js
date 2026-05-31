@@ -1,4 +1,4 @@
-const CACHE_NAME = 'compress-v26';
+const CACHE_NAME = 'compress-v27';
 const SHARE_PROBE_CACHE = 'share-probe-v1';
 
 // Large files that rarely change — cache-first (avoid re-downloading 31MB WASM)
@@ -90,11 +90,27 @@ self.addEventListener('fetch', (event) => {
                     return Response.redirect('/photos/?id=' + id, 303);
                 }
 
-                // Video branch: existing behaviour (postMessage to client)
-                if (videoFile) {
-                    const client = await self.clients.get(event.resultingClientId);
-                    if (client) client.postMessage({ type: 'shared-video', file: videoFile });
-                    return Response.redirect('/', 303);
+                // Video branch: stash in cache + redirect with an id, so the
+                // page PULLS the file on load. (The old postMessage-then-redirect
+                // raced the page's listener — the message often fired before
+                // app.js attached it, dropping large shares onto a blank screen.)
+                if (videoFile && videoFile.size > 0) {
+                    const id = (self.crypto && self.crypto.randomUUID)
+                        ? self.crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+                        : Math.random().toString(36).slice(2, 18);
+                    const cache = await caches.open(SHARE_PROBE_CACHE);
+                    const headers = new Headers({
+                        'Content-Type': videoFile.type || 'video/mp4',
+                        'X-Original-Name': encodeURIComponent(videoFile.name || ''),
+                        'X-Original-Type': videoFile.type || '',
+                        'X-Original-Size': String(videoFile.size),
+                        'X-Captured-At': String(Date.now()),
+                    });
+                    await cache.put(
+                        new Request('/__share-probe/' + id),
+                        new Response(videoFile, { headers })
+                    );
+                    return Response.redirect('/?shared=' + id, 303);
                 }
 
                 // Link branch: no file, but TikTok/YouTube/IG/etc. share-sheet
