@@ -47,6 +47,7 @@
         .stat .sub { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
         .arrow { color: var(--accent); font-size: 22px; font-weight: 700; }
         .saved { text-align: center; color: var(--good); font-weight: 700; font-size: 14px; margin-top: 6px; }
+        .meta-note { text-align: center; color: var(--text-3); font-size: 11px; margin-top: 4px; }
         label.ctl { display: block; margin: 16px 0 6px; font-size: 12px; color: var(--text-2); text-transform: uppercase; letter-spacing: .05em; }
         .seg { display: flex; gap: 6px; flex-wrap: wrap; }
         .seg button {
@@ -96,6 +97,7 @@
                 <div class="stat"><div class="big" id="newSize">—</div><div class="sub" id="newDim">compressed</div></div>
             </div>
             <div class="saved" id="saved"></div>
+            <div class="meta-note" id="metaNote"></div>
         </div>
 
         <div class="card">
@@ -119,10 +121,13 @@
         <p style="text-align:center;margin-top:14px"><a class="home" href="/">← Compress video instead</a></p>
     </div>
 
+<script src="piexif.min.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 let sourceBitmap = null, sourceName = 'photo.jpg', originalSize = 0;
 let outBlob = null, edge = 2560, quality = 0.80;
+let exifObj = null;        // parsed EXIF from the original (JPEG only)
+let sourceIsJpeg = false;
 
 function fmt(bytes) {
     if (bytes < 1024) return bytes + ' B';
@@ -144,16 +149,49 @@ async function loadShared() {
     } catch (_) { return false; }
 }
 
+function blobToDataURL(blob) {
+    return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = rej;
+        r.readAsDataURL(blob);
+    });
+}
+
 async function loadBlob(blob) {
     originalSize = blob.size;
     if (sourceBitmap && sourceBitmap.close) sourceBitmap.close();
     sourceBitmap = await createImageBitmap(blob);
+
+    // Read EXIF from the original so we can carry it onto the compressed file.
+    // piexifjs only handles JPEG; other formats just won't have EXIF to keep.
+    exifObj = null;
+    sourceIsJpeg = (blob.type === 'image/jpeg' || blob.type === 'image/jpg' || /\.jpe?g$/i.test(sourceName));
+    if (sourceIsJpeg && window.piexif) {
+        try { exifObj = piexif.load(await blobToDataURL(blob)); }
+        catch (_) { exifObj = null; }
+    }
+
     $('#empty').style.display = 'none';
     $('#busy').style.display = 'none';
     $('#result').style.display = 'block';
     $('#origSize').textContent = fmt(originalSize);
     $('#origDim').textContent = sourceBitmap.width + '×' + sourceBitmap.height;
     await recompress();
+}
+
+function hasExifData(obj) {
+    if (!obj) return false;
+    return ['0th', 'Exif', 'GPS'].some((k) => obj[k] && Object.keys(obj[k]).length > 0);
+}
+
+function dataURLtoBlob(dataUrl) {
+    const [head, b64] = dataUrl.split(',');
+    const mime = (head.match(/:(.*?);/) || [])[1] || 'image/jpeg';
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
 }
 
 async function recompress() {
@@ -169,7 +207,28 @@ async function recompress() {
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(sourceBitmap, 0, 0, tw, th);
-    outBlob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', quality));
+
+    // Re-attach the original EXIF (date, GPS, camera) to the recompressed JPEG.
+    // createImageBitmap already baked in display orientation, so reset the
+    // Orientation tag to 1 to avoid double-rotation, and sync the dimension tags.
+    let metaKept = false;
+    if (exifObj && hasExifData(exifObj)) {
+        try {
+            const jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
+            exifObj['0th'][piexif.ImageIFD.Orientation] = 1;
+            exifObj['0th'][piexif.ImageIFD.ImageWidth] = tw;
+            exifObj['0th'][piexif.ImageIFD.ImageLength] = th;
+            exifObj['Exif'][piexif.ExifIFD.PixelXDimension] = tw;
+            exifObj['Exif'][piexif.ExifIFD.PixelYDimension] = th;
+            const merged = piexif.insert(piexif.dump(exifObj), jpegDataUrl);
+            outBlob = dataURLtoBlob(merged);
+            metaKept = true;
+        } catch (_) { outBlob = null; }
+    }
+    if (!outBlob) {
+        outBlob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', quality));
+    }
+
     $('#preview').src = URL.createObjectURL(outBlob);
     $('#preview').style.display = 'inline-block';
     $('#newSize').textContent = fmt(outBlob.size);
@@ -177,6 +236,10 @@ async function recompress() {
     const pct = originalSize ? Math.round((1 - outBlob.size / originalSize) * 100) : 0;
     $('#saved').textContent = pct > 0 ? `${pct}% smaller · saved ${fmt(originalSize - outBlob.size)}`
                                       : 'Already small — try lower quality';
+    const hasGps = exifObj && exifObj['GPS'] && Object.keys(exifObj['GPS']).length > 0;
+    $('#metaNote').textContent = metaKept
+        ? `✓ metadata kept${hasGps ? ' (incl. GPS location)' : ''}`
+        : (sourceIsJpeg ? '' : 'metadata not available for this format');
 }
 
 function outName() {

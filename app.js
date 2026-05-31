@@ -1003,7 +1003,9 @@ function buildFFmpegArgs(input, output, preset) {
     args.push(
         '-c:a', 'aac',
         '-b:a', preset.audioBitrate,
-        '-movflags', '+faststart',
+        // Retain container metadata (creation time, GPS/location, rotation, etc.)
+        '-map_metadata', '0',
+        '-movflags', '+faststart+use_metadata_tags',
         '-y', output
     );
 
