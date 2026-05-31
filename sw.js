@@ -1,4 +1,4 @@
-const CACHE_NAME = 'compress-v25';
+const CACHE_NAME = 'compress-v26';
 const SHARE_PROBE_CACHE = 'share-probe-v1';
 
 // Large files that rarely change — cache-first (avoid re-downloading 31MB WASM)
@@ -87,7 +87,7 @@ self.addEventListener('fetch', (event) => {
                         new Request('/__share-probe/' + id),
                         new Response(imageFile, { headers })
                     );
-                    return Response.redirect('/photos-probe/?id=' + id, 303);
+                    return Response.redirect('/photos/?id=' + id, 303);
                 }
 
                 // Video branch: existing behaviour (postMessage to client)
