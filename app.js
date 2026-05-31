@@ -2070,12 +2070,10 @@ async function startUrlAudioShare(url) {
     await new Promise((r) => setTimeout(r, 0));
     await (isMusic ? startUrlAudioShare(sharedUrl) : startUrlDownload());
 
-    // Music → auto-promote to a /v/ audio share link (audio path has no compress UI).
-    // Video → drop straight into the compress page with the downloaded file loaded,
-    // so sharing a video lands you in the editor (share link is still one tap away).
-    if (isMusic) {
-        if (urlDownloadInfo && urlDom.shareBtn) urlDom.shareBtn.click();
-    } else if (urlDownloadedFile && urlDom.compressBtn) {
-        urlDom.compressBtn.click();
+    // Shared LINKS (TikTok / IG / YouTube / music) go directly to a /v/ share link.
+    // (Shared FILES — video or image from Photos — go to the compress page instead;
+    // those are handled by the share-target file branch, not this URL path.)
+    if (urlDownloadInfo && urlDom.shareBtn) {
+        urlDom.shareBtn.click();
     }
 })();
