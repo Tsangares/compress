@@ -430,6 +430,7 @@ async def download_audio(req: DownloadRequest):
 
     out_template = str(out_dir / "%(title).80s.%(ext)s")
 
+    print(f"[audio] start url={req.url!r}", flush=True)
     proc = await asyncio.create_subprocess_exec(
         *YTDLP_BASE,
         "-f", "bestaudio/best",
@@ -446,10 +447,13 @@ async def download_audio(req: DownloadRequest):
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
     if proc.returncode != 0:
-        raise HTTPException(400, f"Audio download failed: {stderr.decode()[:300]}")
+        err = stderr.decode()[-600:]
+        print(f"[audio] FAIL url={req.url!r} rc={proc.returncode}\n{err}", flush=True)
+        raise HTTPException(400, f"Audio download failed: {err[:300]}")
 
     files = list(out_dir.glob("*"))
     if not files:
+        print(f"[audio] FAIL url={req.url!r} no-file-produced", flush=True)
         raise HTTPException(500, "Audio download completed but no file found")
 
     out_file = files[0]
