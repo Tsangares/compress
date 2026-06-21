@@ -494,6 +494,66 @@ async def get_file(file_id: str, filename: str):
     )
 
 
+# ============================================
+# Public programmatic API  (GET, single-call, CORS-open)
+# For external programs: pass a URL, get back the MP3 (or JSON with a link).
+# Caddy strips the "/api" prefix, so these routes are reached publicly at
+#   https://compress.applesauce.chat/api/<route>
+# ============================================
+API_CORS = {"Access-Control-Allow-Origin": "*"}
+
+
+@app.get("/help")
+async def api_docs():
+    """Self-describing index so the API is discoverable at /api/help."""
+    return JSONResponse({
+        "service": "compress-dl",
+        "base": f"{PUBLIC_BASE}/api",
+        "endpoints": {
+            "GET /api/mp3?url=<URL>": "Download audio and stream it back as audio/mpeg (one call).",
+            "GET /api/mp3?url=<URL>&format=json": "Same, but return JSON {title,size,url} with a ~30-min link instead of bytes.",
+            "GET /api/info?url=<URL>": "Metadata only (title, duration, thumbnail) — no download.",
+        },
+        "notes": "Link-form files live ~30 min then are swept. Max 100 MB audio.",
+    }, headers=API_CORS)
+
+
+@app.get("/info")
+async def api_info(url: str):
+    """Metadata-only convenience (GET wrapper around POST /info)."""
+    info = await get_info(InfoRequest(url=url))
+    return JSONResponse(info, headers=API_CORS)
+
+
+@app.get("/mp3")
+async def api_mp3(url: str, format: str = "file"):
+    """URL in, MP3 out. The endpoint other programs call.
+
+    GET /api/mp3?url=https://music.youtube.com/...   -> audio/mpeg bytes
+    GET /api/mp3?url=...&format=json                 -> {"title","size","url"}
+    """
+    result = await download_audio(DownloadRequest(url=url))
+    filepath = DL_DIR / result["id"] / result["filename"]
+    if not filepath.exists():
+        raise HTTPException(500, "MP3 produced but file is missing")
+
+    if format == "json":
+        quoted = urllib.parse.quote(result["filename"])
+        return JSONResponse({
+            "title": Path(result["filename"]).stem,
+            "filename": result["filename"],
+            "size": result["size"],
+            "url": f"{PUBLIC_BASE}/api/file/{result['id']}/{quoted}",
+        }, headers=API_CORS)
+
+    return FileResponse(
+        filepath,
+        media_type="audio/mpeg",
+        filename=result["filename"],
+        headers=API_CORS,
+    )
+
+
 QUALITY_MAP = {
     "high":   {"crf": "23", "preset": "fast", "audio": "128k", "scale": None},
     "medium": {"crf": "28", "preset": "medium", "audio": "96k", "scale": None},
