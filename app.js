@@ -88,6 +88,9 @@ const dom = {
     shareLinkBtn: $('#shareLinkBtn'),
     shareLinkLabel: $('#shareLinkLabel'),
     shareHint: $('#shareHint'),
+    shareOriginalBtn: $('#shareOriginalBtn'),
+    shareOriginalLabel: $('#shareOriginalLabel'),
+    shareOriginalHint: $('#shareOriginalHint'),
     anotherBtn: $('#anotherBtn'),
     engineStatus: $('#engineStatus'),
     engineFill: $('#engineFill'),
@@ -851,7 +854,7 @@ async function startCompression() {
         updateProgress(99);
 
         const data = await ffmpeg.readFile(outputName);
-        state.outputBlob = new Blob([data.buffer], { type: 'video/mp4' });
+        state.outputBlob = new Blob([data], { type: 'video/mp4' });
 
         await ffmpeg.deleteFile(inputName).catch(() => {});
         await ffmpeg.deleteFile(outputName).catch(() => {});
@@ -1119,15 +1122,13 @@ dom.shareBtn.addEventListener('click', async () => {
 
 const SHARE_MAX_BYTES = 200 * 1024 * 1024;
 
-async function uploadShareBlob() {
-    if (!state.outputBlob) throw new Error('No compressed video');
-    if (state.outputBlob.size > SHARE_MAX_BYTES) {
+async function uploadFileForShare(file, filename) {
+    if (!file) throw new Error('No file to share');
+    if (file.size > SHARE_MAX_BYTES) {
         throw new Error('Too large to share (max 200 MB)');
     }
-    const baseName = state.file.name.replace(/\.[^.]+$/, '');
-    const filename = `${baseName}_compressed.mp4`;
     const fd = new FormData();
-    fd.append('file', state.outputBlob, filename);
+    fd.append('file', file, filename);
     const resp = await fetch('/api/share', { method: 'POST', body: fd });
     if (!resp.ok) {
         let msg = `Upload failed (${resp.status})`;
@@ -1141,6 +1142,34 @@ async function uploadShareBlob() {
     return new URL(data.share_url || data.url, window.location.origin).toString();
 }
 
+async function uploadShareBlob() {
+    if (!state.outputBlob) throw new Error('No compressed video');
+    const baseName = state.file.name.replace(/\.[^.]+$/, '');
+    return uploadFileForShare(state.outputBlob, `${baseName}_compressed.mp4`);
+}
+
+// Present a freshly-minted share URL: native share sheet on mobile, else clipboard.
+async function presentShareUrl(url, labelEl, hintEl, origLabel) {
+    if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        try {
+            await navigator.share({ url });
+            labelEl.textContent = 'Shared!';
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                await navigator.clipboard.writeText(url);
+                labelEl.textContent = 'Link copied';
+            } else {
+                labelEl.textContent = origLabel;
+            }
+        }
+    } else {
+        await navigator.clipboard.writeText(url);
+        labelEl.textContent = 'Link copied';
+    }
+    if (navigator.vibrate) navigator.vibrate(10);
+    if (hintEl) hintEl.textContent = 'Link expires in 7 days.';
+}
+
 dom.shareLinkBtn.addEventListener('click', async () => {
     if (!state.outputBlob || dom.shareLinkBtn.disabled) return;
     const origLabel = dom.shareLinkLabel.textContent;
@@ -1148,27 +1177,7 @@ dom.shareLinkBtn.addEventListener('click', async () => {
     dom.shareLinkLabel.textContent = 'Uploading…';
     try {
         const url = await uploadShareBlob();
-
-        // Prefer native share-with-URL on mobile; fall back to clipboard.
-        if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-            try {
-                await navigator.share({ url });
-                dom.shareLinkLabel.textContent = 'Shared!';
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    await navigator.clipboard.writeText(url);
-                    dom.shareLinkLabel.textContent = 'Link copied';
-                } else {
-                    dom.shareLinkLabel.textContent = origLabel;
-                }
-            }
-        } else {
-            await navigator.clipboard.writeText(url);
-            dom.shareLinkLabel.textContent = 'Link copied';
-        }
-
-        if (navigator.vibrate) navigator.vibrate(10);
-        dom.shareHint.textContent = 'Link expires in 7 days.';
+        await presentShareUrl(url, dom.shareLinkLabel, dom.shareHint, origLabel);
     } catch (err) {
         dom.shareLinkLabel.textContent = 'Failed';
         dom.shareHint.textContent = err.message || 'Could not create share link.';
@@ -1176,6 +1185,26 @@ dom.shareLinkBtn.addEventListener('click', async () => {
         setTimeout(() => {
             dom.shareLinkBtn.disabled = false;
             dom.shareLinkLabel.textContent = origLabel;
+        }, 3500);
+    }
+});
+
+// "Just share link" — upload the original file as-is, no compression.
+dom.shareOriginalBtn.addEventListener('click', async () => {
+    if (!state.file || dom.shareOriginalBtn.disabled) return;
+    const origLabel = dom.shareOriginalLabel.textContent;
+    dom.shareOriginalBtn.disabled = true;
+    dom.shareOriginalLabel.textContent = 'Uploading…';
+    try {
+        const url = await uploadFileForShare(state.file, state.file.name);
+        await presentShareUrl(url, dom.shareOriginalLabel, dom.shareOriginalHint, origLabel);
+    } catch (err) {
+        dom.shareOriginalLabel.textContent = 'Failed';
+        dom.shareOriginalHint.textContent = err.message || 'Could not create share link.';
+    } finally {
+        setTimeout(() => {
+            dom.shareOriginalBtn.disabled = false;
+            dom.shareOriginalLabel.textContent = origLabel;
         }, 3500);
     }
 });
@@ -1852,7 +1881,7 @@ async function exportEdit() {
         dom.progressStatus.textContent = 'Reading output...';
 
         const data = await ffmpeg.readFile('output.mp4');
-        state.outputBlob = new Blob([data.buffer], { type: 'video/mp4' });
+        state.outputBlob = new Blob([data], { type: 'video/mp4' });
 
         await ffmpeg.deleteFile(inputName).catch(() => {});
         await ffmpeg.deleteFile('output.mp4').catch(() => {});

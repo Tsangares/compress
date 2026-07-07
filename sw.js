@@ -1,4 +1,4 @@
-const CACHE_NAME = 'compress-v27';
+const CACHE_NAME = 'compress-v28';
 const SHARE_PROBE_CACHE = 'share-probe-v1';
 
 // Large files that rarely change — cache-first (avoid re-downloading 31MB WASM)
@@ -141,6 +141,12 @@ self.addEventListener('fetch', (event) => {
         );
         return;
     }
+
+    // Never intercept non-GET requests (uploads, API POSTs). Re-issuing a
+    // streamed request body via fetch(event.request) can silently drop it —
+    // that's how blob shares to /api/share landed as 0-byte files — and
+    // caching a POST throws anyway. Let them go straight to the network.
+    if (event.request.method !== 'GET') return;
 
     const path = url.pathname;
     const isCacheFirst = CACHE_FIRST.some((p) => path === p || path.startsWith('/lib/'));
