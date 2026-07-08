@@ -865,7 +865,24 @@ async function startCompression() {
         showDone(encodeTime);
     } catch (err) {
         ffmpeg.off('progress', progressHandler);
-        console.error('Compression failed:', err);
+        console.error('Client compression failed:', err);
+
+        // Reset the wasm FS so a retry starts clean.
+        await ffmpeg.deleteFile(inputName).catch(() => {});
+        await ffmpeg.deleteFile(outputName).catch(() => {});
+        state.fileWritten = false;
+
+        // Fall back to native server-side FFmpeg. wasm chokes on plenty of
+        // real-world inputs (HEVC, 10-bit, odd pixel formats, VFR, memory
+        // pressure on mobile) that native ffmpeg handles fine. Only files
+        // <50MB reach the wasm path, so the upload is quick.
+        if (state.file.size <= SHARE_MAX_BYTES) {
+            dom.progressStatus.textContent = 'Retrying on server…';
+            state.compressing = false;
+            releaseWakeLock();
+            return startServerCompression();
+        }
+
         dom.progressStatus.textContent = 'Error: ' + err.message;
     }
 
