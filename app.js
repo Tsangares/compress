@@ -336,12 +336,7 @@ async function startUrlDownload() {
 // URL action buttons
 urlDom.saveBtn.addEventListener('click', () => {
     if (!urlDownloadedFile) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(urlDownloadedFile);
-    a.download = urlDownloadedFile.name;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    if (navigator.vibrate) navigator.vibrate(10);
+    downloadBlob(urlDownloadedFile, urlDownloadedFile.name);
 });
 
 urlDom.shareBtn.addEventListener('click', async () => {
@@ -421,15 +416,10 @@ urlDom.audioBtn.addEventListener('click', async () => {
         if (!fileRes.ok) throw new Error('Could not load audio file');
 
         const blob = await fileRes.blob();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = data.filename;
-        a.click();
-        URL.revokeObjectURL(a.href);
+        downloadBlob(blob, data.filename);
 
         urlDom.status.classList.add('done');
         urlDom.statusText.textContent = `Saved ${data.filename} (${formatBytes(data.size)})`;
-        if (navigator.vibrate) navigator.vibrate(10);
     } catch (err) {
         urlDom.status.classList.add('error');
         urlDom.statusText.textContent = err.message;
@@ -893,6 +883,42 @@ async function startCompression() {
 // ============================================
 // Server-side Compression (for large files)
 // ============================================
+
+// Upload a file to the server for processing, mapping upload progress onto
+// the 0-40% range of the progress ring. Resolves with {id, filename, size}.
+function uploadFileToServer(file, startTime) {
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${DL_API}/upload`);
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const pct = Math.round((e.loaded / e.total) * 40); // 0-40%
+                updateProgress(pct);
+                const elapsed = (Date.now() - startTime) / 1000;
+                if (pct > 3) {
+                    const uploadEta = Math.round((elapsed / pct) * (40 - pct));
+                    dom.progressStatus.textContent = `Uploading... ${Math.round(e.loaded / e.total * 100)}% (~${uploadEta}s)`;
+                }
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve(JSON.parse(xhr.responseText));
+            } else {
+                try { reject(new Error(JSON.parse(xhr.responseText).detail)); }
+                catch { reject(new Error(`Upload failed (${xhr.status})`)); }
+            }
+        };
+        xhr.onerror = () => reject(new Error('Upload failed — network error'));
+        xhr.send(formData);
+    });
+}
+
 async function startServerCompression() {
     state.compressing = true;
     await acquireWakeLock();
@@ -905,36 +931,7 @@ async function startServerCompression() {
         dom.progressStatus.textContent = `Uploading ${formatBytes(state.file.size)}...`;
         updateProgress(0);
 
-        const formData = new FormData();
-        formData.append('file', state.file);
-
-        const uploadRes = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', `${DL_API}/upload`);
-
-            xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                    const pct = Math.round((e.loaded / e.total) * 40); // 0-40%
-                    updateProgress(pct);
-                    const elapsed = (Date.now() - compressStart) / 1000;
-                    if (pct > 3) {
-                        const uploadEta = Math.round((elapsed / pct) * (40 - pct));
-                        dom.progressStatus.textContent = `Uploading... ${Math.round(e.loaded / e.total * 100)}% (~${uploadEta}s)`;
-                    }
-                }
-            };
-
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve(JSON.parse(xhr.responseText));
-                } else {
-                    try { reject(new Error(JSON.parse(xhr.responseText).detail)); }
-                    catch { reject(new Error(`Upload failed (${xhr.status})`)); }
-                }
-            };
-            xhr.onerror = () => reject(new Error('Upload failed — network error'));
-            xhr.send(formData);
-        });
+        const uploadRes = await uploadFileToServer(state.file, compressStart);
 
         // Step 2: Compress on server
         updateProgress(45);
@@ -1115,12 +1112,7 @@ function formatBitrate(kbps) {
 dom.saveBtn.addEventListener('click', () => {
     if (!state.outputBlob) return;
     const baseName = state.file.name.replace(/\.[^.]+$/, '');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(state.outputBlob);
-    a.download = `${baseName}_compressed.mp4`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    if (navigator.vibrate) navigator.vibrate(10);
+    downloadBlob(state.outputBlob, `${baseName}_compressed.mp4`);
 });
 
 dom.shareBtn.addEventListener('click', async () => {
@@ -1281,6 +1273,21 @@ function formatDuration(seconds) {
 function getExtension(filename) {
     const match = filename.match(/\.[^.]+$/);
     return match ? match[0] : '.mp4';
+}
+
+// Trigger a browser download of a blob. The object URL is revoked on a long
+// delay: revoking synchronously after click() aborts the in-flight download on
+// Safari/iOS (always) and Chrome (intermittently, with large blobs).
+function downloadBlob(blob, filename) {
+    const a = document.createElement('a');
+    const href = URL.createObjectURL(blob);
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 60000);
+    if (navigator.vibrate) navigator.vibrate(10);
 }
 
 // ============================================
@@ -1796,8 +1803,10 @@ function updateEditButtons() {
 }
 
 function formatTimePrecise(seconds) {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
+    // Round to 0.1s first so 59.96s carries into the minute instead of "1:60.0"
+    const total = Math.round(seconds * 10) / 10;
+    const m = Math.floor(total / 60);
+    const s = total - m * 60;
     return `${m}:${s.toFixed(1).padStart(4, '0')}`;
 }
 
@@ -1807,6 +1816,15 @@ dom.editExportBtn.addEventListener('click', exportEdit);
 async function exportEdit() {
     const segments = getSegments().filter((_, i) => !editState.deletedSegments.has(i));
     if (segments.length === 0) return;
+
+    dom.editPreview.pause();
+    editState.playing = false;
+
+    // Large files can't go through the wasm FS (the whole input is copied into
+    // the wasm heap) — trim them on the server with native FFmpeg instead.
+    if (state.file.size > SERVER_COMPRESS_THRESHOLD) {
+        return startServerTrim(segments);
+    }
 
     // Load FFmpeg if needed
     if (!state.ffmpegLoaded) {
@@ -1818,9 +1836,6 @@ async function exportEdit() {
         if (!state.ffmpegLoaded) return;
     }
 
-    dom.editPreview.pause();
-    editState.playing = false;
-
     // Switch to progress screen
     goToScreen(2);
     dom.progressStatus.textContent = 'Writing file...';
@@ -1828,73 +1843,51 @@ async function exportEdit() {
 
     const ffmpeg = state.ffmpeg;
     const inputName = 'input' + getExtension(state.file.name);
+    const exportStart = Date.now();
+
+    // Stream copy is only safe for a pure end-trim (single segment from 0):
+    // it just drops trailing frames. Any other cut lands mid-GOP, where copy
+    // snaps video to the previous keyframe while audio cuts exactly — output
+    // runs long, starts desynced, and concat joins get garbage frames.
+    const copySafe = segments.length === 1 && segments[0].start < 0.05;
+
+    const progressHandler = ({ progress }) => {
+        updateProgress(Math.min(10 + Math.round(progress * 85), 95));
+    };
 
     try {
         // Write input file
         await ffmpeg.writeFile(inputName, await fetchFile(state.file));
         updateProgress(10);
+        dom.progressStatus.textContent = 'Trimming...';
 
-        if (segments.length === 1) {
-            // Single segment — simple trim
-            const seg = segments[0];
-            dom.progressStatus.textContent = 'Trimming...';
-
-            await ffmpeg.exec([
-                '-ss', String(seg.start),
+        let mode;
+        if (copySafe) {
+            const ret = await ffmpeg.exec([
                 '-i', inputName,
-                '-t', String(seg.end - seg.start),
+                '-t', String(segments[0].end),
                 '-c', 'copy',
+                '-avoid_negative_ts', 'make_zero',
                 '-movflags', '+faststart',
                 '-y', 'output.mp4',
             ]);
-            updateProgress(80);
+            if (ret !== 0) throw new Error('Trim failed');
+            mode = 'copy';
         } else {
-            // Multiple segments — cut each then concat
-            const partNames = [];
-
-            for (let i = 0; i < segments.length; i++) {
-                const seg = segments[i];
-                const partName = `part${i}.mp4`;
-                partNames.push(partName);
-
-                dom.progressStatus.textContent = `Cutting segment ${i + 1} of ${segments.length}...`;
-                const pct = 10 + (i / segments.length) * 60;
-                updateProgress(Math.round(pct));
-
-                await ffmpeg.exec([
-                    '-ss', String(seg.start),
-                    '-i', inputName,
-                    '-t', String(seg.end - seg.start),
-                    '-c', 'copy',
-                    '-avoid_negative_ts', 'make_zero',
-                    '-y', partName,
-                ]);
+            // Frame-accurate export: re-encode all kept segments in a single
+            // trim/concat filtergraph pass.
+            ffmpeg.on('progress', progressHandler);
+            let ret = await ffmpeg.exec(buildTrimArgs(inputName, segments, true));
+            if (ret !== 0) {
+                // Inputs without an audio stream make atrim fail — retry video-only.
+                ret = await ffmpeg.exec(buildTrimArgs(inputName, segments, false));
             }
-
-            // Build concat list
-            dom.progressStatus.textContent = 'Joining segments...';
-            updateProgress(75);
-
-            const concatList = partNames.map(n => `file '${n}'`).join('\n');
-            await ffmpeg.writeFile('concat.txt', concatList);
-
-            await ffmpeg.exec([
-                '-f', 'concat',
-                '-safe', '0',
-                '-i', 'concat.txt',
-                '-c', 'copy',
-                '-movflags', '+faststart',
-                '-y', 'output.mp4',
-            ]);
-
-            // Cleanup parts
-            for (const name of partNames) {
-                await ffmpeg.deleteFile(name).catch(() => {});
-            }
-            await ffmpeg.deleteFile('concat.txt').catch(() => {});
+            ffmpeg.off('progress', progressHandler);
+            if (ret !== 0) throw new Error('Trim failed');
+            mode = 'reencode';
         }
 
-        updateProgress(90);
+        updateProgress(95);
         dom.progressStatus.textContent = 'Reading output...';
 
         const data = await ffmpeg.readFile('output.mp4');
@@ -1902,16 +1895,118 @@ async function exportEdit() {
 
         await ffmpeg.deleteFile(inputName).catch(() => {});
         await ffmpeg.deleteFile('output.mp4').catch(() => {});
+        state.fileWritten = false; // input was deleted; don't let compression reuse it
 
         updateProgress(100);
-        showEditDone();
+        showEditDone(mode, (Date.now() - exportStart) / 1000);
     } catch (err) {
+        ffmpeg.off('progress', progressHandler);
         console.error('Export failed:', err);
+        await ffmpeg.deleteFile(inputName).catch(() => {});
+        await ffmpeg.deleteFile('output.mp4').catch(() => {});
+        state.fileWritten = false;
+
+        // Same rationale as compression: wasm chokes on inputs that native
+        // ffmpeg handles fine — retry the trim on the server.
+        if (state.file.size <= SHARE_MAX_BYTES) {
+            dom.progressStatus.textContent = 'Retrying on server…';
+            return startServerTrim(segments);
+        }
         dom.progressStatus.textContent = 'Error: ' + err.message;
     }
 }
 
-function showEditDone() {
+// Build a single-pass frame-accurate trim: per-segment trim/atrim filters
+// rebased with setpts/asetpts, joined with concat.
+function buildTrimArgs(input, segments, withAudio) {
+    const filters = [];
+    const joins = [];
+    segments.forEach((seg, i) => {
+        filters.push(`[0:v]trim=start=${seg.start}:end=${seg.end},setpts=PTS-STARTPTS[v${i}]`);
+        if (withAudio) filters.push(`[0:a]atrim=start=${seg.start}:end=${seg.end},asetpts=PTS-STARTPTS[a${i}]`);
+        joins.push(withAudio ? `[v${i}][a${i}]` : `[v${i}]`);
+    });
+    filters.push(`${joins.join('')}concat=n=${segments.length}:v=1:a=${withAudio ? 1 : 0}${withAudio ? '[v][a]' : '[v]'}`);
+
+    const args = ['-i', input, '-filter_complex', filters.join(';'), '-map', '[v]'];
+    if (withAudio) args.push('-map', '[a]', '-c:a', 'aac', '-b:a', '128k');
+    args.push(
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '22',
+        '-map_metadata', '0',
+        '-movflags', '+faststart+use_metadata_tags',
+        '-y', 'output.mp4',
+    );
+    return args;
+}
+
+// Server-side trim for files too big for the wasm heap (or when wasm fails).
+// Mirrors startServerCompression: upload → POST /trim → download result.
+async function startServerTrim(segments) {
+    state.compressing = true;
+    await acquireWakeLock();
+    goToScreen(2);
+
+    const startTime = Date.now();
+    const payload = segments.map(s => ({ start: s.start, end: s.end }));
+
+    const requestTrim = async (fileId, filename) => fetch(`${DL_API}/trim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: fileId, filename, segments: payload }),
+    });
+
+    try {
+        let trimRes = null;
+
+        // Files fetched via paste-a-link already live on the server — trim
+        // them in place instead of re-uploading. 404 = server copy expired.
+        if (urlDownloadInfo && state.file === urlDownloadedFile) {
+            dom.progressStatus.textContent = 'Trimming on server...';
+            updateProgress(45);
+            const res = await requestTrim(urlDownloadInfo.id, urlDownloadInfo.filename);
+            if (res.ok) trimRes = res;
+            else if (res.status !== 404) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Server trim failed');
+            }
+        }
+
+        if (!trimRes) {
+            dom.progressStatus.textContent = `Uploading ${formatBytes(state.file.size)}...`;
+            updateProgress(0);
+            const up = await uploadFileToServer(state.file, startTime);
+            updateProgress(45);
+            dom.progressStatus.textContent = 'Trimming on server...';
+            const res = await requestTrim(up.id, up.filename);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'Server trim failed');
+            }
+            trimRes = res;
+        }
+
+        const trimData = await trimRes.json();
+        updateProgress(80);
+
+        dom.progressStatus.textContent = `Downloading ${formatBytes(trimData.size)}...`;
+        const fileRes = await fetch(`${DL_API}/file/${trimData.id}/${encodeURIComponent(trimData.filename)}`);
+        if (!fileRes.ok) throw new Error('Could not download trimmed file');
+
+        state.outputBlob = new Blob([await fileRes.blob()], { type: 'video/mp4' });
+        updateProgress(100);
+        showEditDone('server', (Date.now() - startTime) / 1000);
+    } catch (err) {
+        console.error('Server trim failed:', err);
+        dom.progressStatus.textContent = 'Error: ' + err.message;
+    }
+
+    state.compressing = false;
+    releaseWakeLock();
+}
+
+function showEditDone(mode = 'copy', encodeTime = 0) {
     const originalSize = state.file.size;
     const outputSize = state.outputBlob.size;
     const savings = ((1 - outputSize / originalSize) * 100).toFixed(1);
@@ -1924,24 +2019,32 @@ function showEditDone() {
     dom.afterSize.textContent = formatBytes(outputSize);
     dom.savingsPercent.textContent = `${savings}%`;
 
+    const isCopy = mode === 'copy';
+    const cuts = `${editState.splits.length} cut${editState.splits.length !== 1 ? 's' : ''} removed ${formatDuration(state.duration - keptDuration)} of footage.`;
+    const explainers = {
+        copy: `Stream copy mode was used — no re-encoding. The original video and audio streams were copied directly, preserving full quality. ${cuts}`,
+        reencode: `The kept segments were re-encoded (H.264, CRF 22) for frame-accurate cuts — stream copy can only cut on keyframes, which shifts cut points and desyncs audio. ${cuts}`,
+        server: `The video was trimmed on the server with native FFmpeg — it was too large to process in the browser. Cuts are frame-accurate. ${cuts}`,
+    };
+
     const s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     s('statInRes', `${state.width} x ${state.height}`);
     s('statDuration', `${formatDuration(state.duration)} → ${formatDuration(keptDuration)}`);
     s('statInBitrate', formatBitrate(Math.round((originalSize * 8) / state.duration / 1000)));
     s('statInSize', formatBytes(originalSize));
-    s('statCodec', 'Copy (lossless)');
+    s('statCodec', isCopy ? 'Copy (lossless)' : 'H.264 (CRF 22)');
     s('statMode', `${keptSegments.length} segment${keptSegments.length > 1 ? 's' : ''} kept`);
-    s('statPreset', 'N/A (stream copy)');
-    s('statAudio', 'Copy (lossless)');
+    s('statPreset', isCopy ? 'N/A (stream copy)' : (mode === 'server' ? 'veryfast (server)' : 'ultrafast'));
+    s('statAudio', isCopy ? 'Copy (lossless)' : 'AAC 128k');
     s('statContainer', 'MP4 (faststart)');
     s('statOutSize', formatBytes(outputSize));
     s('statOutBitrate', formatBitrate(Math.round((outputSize * 8) / keptDuration / 1000)));
     const ratio = (originalSize / outputSize).toFixed(1);
     s('statRatio', `${ratio}:1`);
     s('statSaved', formatBytes(originalSize - outputSize));
-    s('statTime', 'Instant (copy)');
-    s('statSpeed', 'N/A');
-    s('statExplainer', `Stream copy mode was used — no re-encoding. The original video and audio streams were copied directly, preserving full quality. ${editState.splits.length} cut${editState.splits.length !== 1 ? 's' : ''} removed ${formatDuration(state.duration - keptDuration)} of footage.`);
+    s('statTime', isCopy ? 'Instant (copy)' : `${encodeTime.toFixed(1)}s`);
+    s('statSpeed', isCopy || encodeTime === 0 ? 'N/A' : `${(keptDuration / encodeTime).toFixed(1)}x`);
+    s('statExplainer', explainers[mode] || explainers.copy);
 
     if (navigator.vibrate) navigator.vibrate([50, 50, 100]);
     goToScreen(3);
