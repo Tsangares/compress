@@ -1,4 +1,4 @@
-const CACHE_NAME = 'compress-v28';
+const CACHE_NAME = 'compress-v29';
 const SHARE_PROBE_CACHE = 'share-probe-v1';
 
 // Large files that rarely change — cache-first (avoid re-downloading 31MB WASM)
@@ -165,10 +165,16 @@ self.addEventListener('fetch', (event) => {
             )
         );
     } else {
-        // Network-first: always try fresh, fall back to cache
+        // Network-first: always try fresh, fall back to cache. Only app-shell
+        // files may enter the cache — API responses (downloaded/shared video
+        // bodies, share metadata) used to get cache.put() here too, blowing
+        // the storage quota until the browser evicted the 31MB wasm entries
+        // (engine load failures) and serving stale share data offline.
+        const cacheable = NETWORK_FIRST.includes(path)
+            || path === '/photos/' || path === '/photos/index.html';
         event.respondWith(
             fetch(event.request).then((response) => {
-                if (response.ok) {
+                if (response.ok && cacheable) {
                     const clone = response.clone();
                     caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
                 }

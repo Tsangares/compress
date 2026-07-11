@@ -187,9 +187,21 @@ function handleFile(file) {
     state.file = file;
     state.fileWritten = false;
 
-    const url = URL.createObjectURL(file);
-    dom.preview.src = url;
-    dom.preview.play().catch(() => {});
+    // Undecodable input (HEVC .mov, mislabeled containers): the browser can't
+    // preview it, but ffmpeg often still can — proceed to the options screen
+    // with unknown metadata instead of dying silently on the home screen.
+    dom.preview.onerror = () => {
+        state.duration = 0;
+        state.width = 0;
+        state.height = 0;
+        dom.infoSize.textContent = formatBytes(file.size);
+        dom.infoDuration.textContent = '—';
+        dom.infoRes.textContent = 'Preview unavailable';
+        dom.estTestedRow.classList.add('hidden');
+        dom.estTesting.classList.add('hidden');
+        showToast("This video can't be previewed in your browser — compression may still work.");
+        goToScreen(1);
+    };
 
     dom.preview.onloadedmetadata = () => {
         state.duration = dom.preview.duration;
@@ -207,6 +219,11 @@ function handleFile(file) {
 
         goToScreen(1);
     };
+
+    // Handlers are attached above *before* src is set, so a synchronously
+    // failing load can't slip past them.
+    setVideoSrc(dom.preview, file);
+    dom.preview.play().catch(() => {});
 }
 
 // Drag & drop
@@ -442,14 +459,16 @@ urlDom.editBtn.addEventListener('click', () => {
     // Load file metadata then go to edit
     state.file = urlDownloadedFile;
     state.fileWritten = false;
-    const url = URL.createObjectURL(urlDownloadedFile);
-    dom.preview.src = url;
+    dom.preview.onerror = () => {
+        showToast("This video can't be previewed in your browser.");
+    };
     dom.preview.onloadedmetadata = () => {
         state.duration = dom.preview.duration;
         state.width = dom.preview.videoWidth;
         state.height = dom.preview.videoHeight;
         enterEditMode();
     };
+    setVideoSrc(dom.preview, urlDownloadedFile);
 });
 
 // ============================================
@@ -984,7 +1003,12 @@ async function startServerCompression() {
 function buildFFmpegArgs(input, output, preset) {
     const args = ['-i', input];
 
-    if (state.quality === 'target') {
+    if (state.quality === 'target' && !(state.duration > 0)) {
+        // Duration unknown (browser couldn't decode the preview) — a target
+        // bitrate can't be computed. Approximate the "fit under 10MB" intent
+        // with aggressive CRF instead of dividing by zero.
+        args.push('-c:v', 'libx264', '-preset', preset.preset, '-crf', '32');
+    } else if (state.quality === 'target') {
         const targetBytes = preset.targetMB * 1024 * 1024;
         const audioBitrateKbps = parseInt(preset.audioBitrate) || 64;
         const totalBitrateKbps = Math.floor((targetBytes * 8) / state.duration / 1000);
@@ -1225,7 +1249,8 @@ dom.anotherBtn.addEventListener('click', () => {
     state.width = 0;
     state.height = 0;
     state.fileWritten = false;
-    dom.preview.src = '';
+    setVideoSrc(dom.preview, null);
+    setVideoSrc(dom.editPreview, null);
     dom.fileInput.value = '';
     goToScreen(0);
 });
@@ -1275,6 +1300,45 @@ function getExtension(filename) {
     return match ? match[0] : '.mp4';
 }
 
+// Object-URL lifecycle: each <video> element keeps at most one live URL —
+// minting a new one revokes the previous. Prevents unbounded blob retention
+// when users load file after file ("Compress another", re-entering the
+// editor), which compounded memory pressure until media loads failed.
+const liveVideoUrls = new Map(); // element -> object URL
+function setVideoSrc(el, file) {
+    const prev = liveVideoUrls.get(el);
+    if (prev) {
+        URL.revokeObjectURL(prev);
+        liveVideoUrls.delete(el);
+    }
+    if (file) {
+        const url = URL.createObjectURL(file);
+        liveVideoUrls.set(el, url);
+        el.src = url;
+    } else {
+        el.removeAttribute('src');
+        if (el.load) el.load();
+    }
+}
+
+// Minimal toast for surfacing errors that previously failed silently
+// (undecodable previews, dead thumbnail generation).
+let toastTimer = null;
+function showToast(message) {
+    let el = document.getElementById('appToast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'appToast';
+        el.className = 'app-toast';
+        el.setAttribute('role', 'status');
+        document.body.appendChild(el);
+    }
+    el.textContent = message;
+    el.classList.add('visible');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('visible'), 4000);
+}
+
 // Trigger a browser download of a blob. The object URL is revoked on a long
 // delay: revoking synchronously after click() aborts the in-flight download on
 // Safari/iOS (always) and Chrome (intermittently, with large blobs).
@@ -1314,9 +1378,11 @@ dom.editBtn.addEventListener('click', () => {
 });
 
 function enterEditMode() {
-    const url = URL.createObjectURL(state.file);
-    dom.editPreview.src = url;
-    dom.editPreview.currentTime = 0;
+    // Bail out loudly if the browser can't decode this file — previously the
+    // Edit button just did nothing (onloadedmetadata never fired).
+    dom.editPreview.onerror = () => {
+        showToast("This video can't be edited here — your browser can't decode it.");
+    };
 
     dom.editPreview.onloadedmetadata = () => {
         dom.editTotalTime.textContent = formatDuration(dom.editPreview.duration);
@@ -1339,6 +1405,9 @@ function enterEditMode() {
             updateEditButtons();
         });
     };
+
+    setVideoSrc(dom.editPreview, state.file);
+    dom.editPreview.currentTime = 0;
 }
 
 dom.editBack.addEventListener('click', () => {
@@ -1552,43 +1621,79 @@ function generateThumbnails() {
 
     const signal = thumbGenAbort.signal;
     let i = 0;
+    let pendingSeek = false;
+    let seekWatchdog = null;
+
+    function finish() {
+        editState.thumbsGenerated = true;
+        // Cache base thumbnails as a canvas (cheaper than ImageData)
+        const cache = document.createElement('canvas');
+        cache.width = totalW;
+        cache.height = 56;
+        cache.getContext('2d').drawImage(canvas, 0, 0);
+        editState.baseThumbCanvas = cache;
+        clearTimeout(seekWatchdog);
+        tmpVideo.src = '';
+        renderRuler(totalW);
+        dom.zoomFill.style.width = '0%';
+        dom.zoomLabel.textContent = '1x';
+    }
+
+    // Some inputs decode in <video> but stall on seeks (fragmented MP4s,
+    // network-mounted files). Without a watchdog the timeline stayed a grey
+    // slab forever — now a stuck seek just skips ahead.
+    function armWatchdog() {
+        clearTimeout(seekWatchdog);
+        seekWatchdog = setTimeout(() => {
+            if (!signal.aborted && pendingSeek) drawAndAdvance();
+        }, 2500);
+    }
 
     function drawAndAdvance() {
-        if (signal.aborted) { tmpVideo.src = ''; return; }
+        if (signal.aborted) { clearTimeout(seekWatchdog); tmpVideo.src = ''; return; }
+        if (!pendingSeek) return; // stale 'seeked' after the watchdog already advanced
+        pendingSeek = false;
+        clearTimeout(seekWatchdog);
 
-        const srcAspect = tmpVideo.videoWidth / tmpVideo.videoHeight;
-        const drawH = 56;
-        const drawW = drawH * srcAspect;
-        const x = i * thumbW;
-        const offsetX = (thumbW - drawW) / 2;
-        ctx.drawImage(tmpVideo, x + Math.max(0, offsetX), 0, Math.min(thumbW, drawW), drawH);
+        if (tmpVideo.videoWidth > 0) {
+            const srcAspect = tmpVideo.videoWidth / tmpVideo.videoHeight;
+            const drawH = 56;
+            const drawW = drawH * srcAspect;
+            const x = i * thumbW;
+            const offsetX = (thumbW - drawW) / 2;
+            ctx.drawImage(tmpVideo, x + Math.max(0, offsetX), 0, Math.min(thumbW, drawW), drawH);
+        }
 
         i++;
         if (i < numThumbs) {
             // Yield to the browser between seeks to prevent "not responding"
             setTimeout(() => {
                 if (signal.aborted) { tmpVideo.src = ''; return; }
+                pendingSeek = true;
+                armWatchdog();
                 tmpVideo.currentTime = (i / numThumbs) * state.duration;
             }, 0);
         } else {
-            editState.thumbsGenerated = true;
-            // Cache base thumbnails as a canvas (cheaper than ImageData)
-            const cache = document.createElement('canvas');
-            cache.width = totalW;
-            cache.height = 56;
-            cache.getContext('2d').drawImage(canvas, 0, 0);
-            editState.baseThumbCanvas = cache;
-            tmpVideo.src = '';
-            renderRuler(totalW);
-            dom.zoomFill.style.width = '0%';
-            dom.zoomLabel.textContent = '1x';
+            finish();
         }
     }
 
     tmpVideo.onseeked = drawAndAdvance;
-    tmpVideo.onloadeddata = () => {
-        if (!signal.aborted) tmpVideo.currentTime = 0;
+    tmpVideo.onerror = () => {
+        // Undecodable in <video>: leave the flat background and let the
+        // editor proceed — scrubbing works off the track, not the thumbs.
+        if (!signal.aborted) finish();
     };
+    tmpVideo.onloadeddata = () => {
+        if (!signal.aborted) {
+            pendingSeek = true;
+            armWatchdog();
+            tmpVideo.currentTime = 0;
+        }
+    };
+    // If loadeddata itself never fires, the load watchdog degrades gracefully.
+    pendingSeek = true;
+    armWatchdog();
 }
 
 function regenerateThumbsForZoom(totalW) {

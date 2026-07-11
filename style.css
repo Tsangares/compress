@@ -2029,3 +2029,27 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
    Utilities
    ====================================================== */
 .hidden { display: none !important; }
+
+/* Toast — transient error/status messages (created by app.js showToast) */
+.app-toast {
+    position: fixed;
+    left: 50%;
+    bottom: max(24px, env(safe-area-inset-bottom, 24px));
+    transform: translateX(-50%) translateY(12px);
+    max-width: min(90vw, 420px);
+    padding: 12px 18px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 14px;
+    line-height: 1.4;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    z-index: 1000;
+}
+.app-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
