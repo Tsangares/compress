@@ -19,7 +19,11 @@ what="${1:-frontend}"
 
 deploy_frontend() {
     echo "==> rsync static files -> $HOST:$FRONT_DEST"
+    # ssh lands as wil; /opt/compress is crawler-owned -> escalate the remote
+    # rsync via passwordless sudo and keep the crawler ownership convention.
     rsync -av --delete \
+        --rsync-path="sudo rsync" \
+        --chown=crawler:crawler \
         --exclude .git \
         --exclude tests \
         --exclude __pycache__ \
@@ -35,8 +39,8 @@ deploy_frontend() {
 
 deploy_backend() {
     echo "==> scp dl-service.py -> $HOST:$BACK_DEST + restart $UNIT"
-    scp dl-service.py "$HOST:$BACK_DEST/dl-service.py"
-    ssh "$HOST" "systemctl restart $UNIT"
+    scp dl-service.py "$HOST:/tmp/dl-service.py.new"
+    ssh "$HOST" "sudo mv /tmp/dl-service.py.new $BACK_DEST/dl-service.py && sudo systemctl restart $UNIT"
     sleep 2
     ssh "$HOST" "systemctl is-active $UNIT"
 }
