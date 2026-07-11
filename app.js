@@ -739,11 +739,16 @@ async function loadFFmpeg() {
         dom.engineLabel.textContent = 'Engine ready';
         dom.engineStatus.classList.add('ready');
     } catch (err) {
+        // Navigating away aborts the in-flight wasm fetch — not a failure.
+        if (pageUnloading) return;
         console.error('Failed to load FFmpeg:', err);
         dom.engineLabel.textContent = 'Engine failed — refresh to retry';
         state.ffmpegLoading = false;
     }
 }
+
+let pageUnloading = false;
+window.addEventListener('pagehide', () => { pageUnloading = true; });
 
 // ============================================
 // Background Support (Wake Lock + Notifications)
