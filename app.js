@@ -1211,6 +1211,8 @@ function setSavingsBadge(originalSize, outputSize) {
     const grew = outputSize >= originalSize;
     dom.savingsBadge.textContent = grew ? `${pct}% larger` : `${pct}% smaller`;
     dom.savingsBadge.classList.toggle('grew', grew);
+    const afterRow = dom.afterSize.closest('.size-row');
+    if (afterRow) afterRow.classList.toggle('grew', grew);
     return grew;
 }
 

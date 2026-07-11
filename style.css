@@ -578,6 +578,7 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     left: 0;
     right: 0;
     pointer-events: none;
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1120,6 +1121,13 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
 }
 
 .size-row.result .size-val { color: var(--success); }
+
+/* Output grew — don't dress the After row in success green */
+.size-row.result.grew {
+    background: rgba(180, 83, 9, 0.10);
+    border-color: rgba(180, 83, 9, 0.25);
+}
+.size-row.result.grew .size-val { color: #B45309; }
 
 .size-arrow {
     width: 20px;
