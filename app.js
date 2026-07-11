@@ -130,6 +130,15 @@ const dom = {
     segmentList: $('#segmentList'),
 };
 
+// Haptic tap. Chromium blocks navigator.vibrate() (with a console warning)
+// until the user has interacted with the page, and share-target / ?share=
+// handoffs navigate screens before any tap — so gate on user activation.
+function vibrate(pattern) {
+    if (!navigator.vibrate) return;
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+    try { navigator.vibrate(pattern); } catch (_) { /* ignore */ }
+}
+
 // ============================================
 // Screen Navigation
 // ============================================
@@ -151,7 +160,7 @@ function goToScreen(index, pushHistory = true) {
     // Show resume card on home screen if a file is loaded
     updateResumeCard(index);
 
-    if (navigator.vibrate) navigator.vibrate(10);
+    vibrate(10);
 }
 
 function updateResumeCard(screenIndex) {
@@ -171,6 +180,9 @@ const SCREEN_BACK = { 3: 0, 4: 0, 5: 1 };
 
 window.addEventListener('popstate', (e) => {
     if (state.currentScreen > 0) {
+        // Backing out of the progress screen must cancel the job, same as
+        // the Cancel button — otherwise it finishes and hijacks the UI.
+        if (state.currentScreen === 2) cancelActiveJob();
         const target = SCREEN_BACK[state.currentScreen] ?? state.currentScreen - 1;
         goToScreen(target, false);
     }
@@ -518,7 +530,7 @@ pills.forEach((btn) => {
         dom.estTesting.classList.add('hidden');
         updateQuickEstimate();
 
-        if (navigator.vibrate) navigator.vibrate(5);
+        vibrate(5);
     });
 });
 
@@ -771,6 +783,41 @@ function notifyCompletion(savings) {
 }
 
 // ============================================
+// Job cancellation
+// ============================================
+// Monotonic token: bumping it orphans any in-flight compress/trim job, so a
+// cancelled run can't hijack the UI later (every job checks jobAlive before
+// touching the screen). Cancel also terminates the wasm worker — mid-exec
+// output is useless — and aborts any in-flight upload/server request.
+let jobToken = 0;
+let activeUploadXhr = null;
+let activeFetchCtrl = null;
+
+function newJob() {
+    activeFetchCtrl = new AbortController();
+    return ++jobToken;
+}
+const jobAlive = (t) => t === jobToken;
+
+function cancelActiveJob() {
+    jobToken++;
+    if (activeUploadXhr) { activeUploadXhr.abort(); activeUploadXhr = null; }
+    if (activeFetchCtrl) { activeFetchCtrl.abort(); activeFetchCtrl = null; }
+    if (state.compressing && state.ffmpeg) {
+        // Kill the worker mid-exec; reload in the background for the next run.
+        try { state.ffmpeg.terminate(); } catch (_) {}
+        state.ffmpeg = null;
+        state.ffmpegLoaded = false;
+        state.ffmpegLoading = false;
+        state.fileWritten = false;
+        dom.engineStatus.classList.remove('ready');
+        loadFFmpeg();
+    }
+    state.compressing = false;
+    releaseWakeLock();
+}
+
+// ============================================
 // Compression
 // ============================================
 const SERVER_COMPRESS_THRESHOLD = 50 * 1024 * 1024; // 50MB
@@ -799,6 +846,7 @@ async function startCompression() {
         Notification.requestPermission();
     }
 
+    const job = newJob();
     state.compressing = true;
     await acquireWakeLock();
     goToScreen(2);
@@ -837,6 +885,7 @@ async function startCompression() {
 
         const args = buildFFmpegArgs(inputName, outputName, preset);
         await ffmpeg.exec(args);
+        if (!jobAlive(job)) return;
 
         ffmpeg.off('progress', progressHandler);
 
@@ -844,6 +893,7 @@ async function startCompression() {
         updateProgress(99);
 
         const data = await ffmpeg.readFile(outputName);
+        if (!jobAlive(job)) return;
         state.outputBlob = new Blob([data], { type: 'video/mp4' });
 
         await ffmpeg.deleteFile(inputName).catch(() => {});
@@ -854,6 +904,8 @@ async function startCompression() {
         updateProgress(100);
         showDone(encodeTime);
     } catch (err) {
+        // Cancelled: the terminated worker rejects the pending exec — go quietly.
+        if (!jobAlive(job)) return;
         ffmpeg.off('progress', progressHandler);
         console.error('Client compression failed:', err);
 
@@ -893,6 +945,7 @@ function uploadFileToServer(file, startTime) {
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${DL_API}/upload`);
+        activeUploadXhr = xhr;
 
         xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
@@ -907,6 +960,7 @@ function uploadFileToServer(file, startTime) {
         };
 
         xhr.onload = () => {
+            activeUploadXhr = null;
             if (xhr.status >= 200 && xhr.status < 300) {
                 resolve(JSON.parse(xhr.responseText));
             } else {
@@ -914,12 +968,15 @@ function uploadFileToServer(file, startTime) {
                 catch { reject(new Error(`Upload failed (${xhr.status})`)); }
             }
         };
-        xhr.onerror = () => reject(new Error('Upload failed — network error'));
+        xhr.onerror = () => { activeUploadXhr = null; reject(new Error('Upload failed — network error')); };
+        xhr.onabort = () => { activeUploadXhr = null; reject(new Error('Cancelled')); };
         xhr.send(formData);
     });
 }
 
 async function startServerCompression() {
+    const job = newJob();
+    const signal = activeFetchCtrl.signal;
     state.compressing = true;
     await acquireWakeLock();
     goToScreen(2);
@@ -932,6 +989,7 @@ async function startServerCompression() {
         updateProgress(0);
 
         const uploadRes = await uploadFileToServer(state.file, compressStart);
+        if (!jobAlive(job)) return;
 
         // Step 2: Compress on server
         updateProgress(45);
@@ -950,7 +1008,9 @@ async function startServerCompression() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(compressBody),
+            signal,
         });
+        if (!jobAlive(job)) return;
 
         if (!compressRes.ok) {
             const err = await compressRes.json().catch(() => ({}));
@@ -963,16 +1023,18 @@ async function startServerCompression() {
         // Step 3: Download result
         dom.progressStatus.textContent = `Downloading ${formatBytes(compressData.size)}...`;
 
-        const fileRes = await fetch(`${DL_API}/file/${compressData.id}/${encodeURIComponent(compressData.filename)}`);
+        const fileRes = await fetch(`${DL_API}/file/${compressData.id}/${encodeURIComponent(compressData.filename)}`, { signal });
         if (!fileRes.ok) throw new Error('Could not download compressed file');
 
         const blob = await fileRes.blob();
+        if (!jobAlive(job)) return;
         state.outputBlob = new Blob([blob], { type: 'video/mp4' });
 
         updateProgress(100);
         const encodeTime = (Date.now() - compressStart) / 1000;
         showDone(encodeTime);
     } catch (err) {
+        if (!jobAlive(job)) return; // cancelled — aborted fetch/xhr lands here
         console.error('Server compression failed:', err);
         dom.progressStatus.textContent = 'Error: ' + err.message;
     }
@@ -1104,7 +1166,7 @@ function showDone(encodeTimeSec) {
     s('statExplainer', explainer);
 
     notifyCompletion(savings);
-    if (navigator.vibrate) navigator.vibrate([50, 50, 100]);
+    vibrate([50, 50, 100]);
     goToScreen(3);
 }
 
@@ -1179,7 +1241,7 @@ async function presentShareUrl(url, labelEl, hintEl, origLabel) {
         await navigator.clipboard.writeText(url);
         labelEl.textContent = 'Link copied';
     }
-    if (navigator.vibrate) navigator.vibrate(10);
+    vibrate(10);
     if (hintEl) hintEl.textContent = 'Link expires in 7 days.';
 }
 
@@ -1232,13 +1294,27 @@ dom.anotherBtn.addEventListener('click', () => {
     setVideoSrc(dom.preview, null);
     setVideoSrc(dom.editPreview, null);
     dom.fileInput.value = '';
+    // Reset the paste-a-link section too — otherwise a stale "Ready — file"
+    // status and downloaded blob linger on the fresh home screen.
+    urlDownloadedFile = null;
+    urlDownloadInfo = null;
+    urlDom.status.classList.add('hidden');
+    urlDom.status.classList.remove('done', 'error');
+    urlDom.actions.classList.add('hidden');
+    urlDom.input.value = '';
+    setHomeCompact(false);
     goToScreen(0);
 });
 
 // ============================================
 // Cancel & Back
 // ============================================
-dom.cancelBtn.addEventListener('click', () => goToScreen(1));
+dom.cancelBtn.addEventListener('click', () => {
+    // Actually stop the work — previously this just switched screens and the
+    // orphaned job yanked the user to the done screen when it finished.
+    cancelActiveJob();
+    goToScreen(1);
+});
 
 document.querySelectorAll('[data-back]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1331,7 +1407,7 @@ function downloadBlob(blob, filename) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(href), 60000);
-    if (navigator.vibrate) navigator.vibrate(10);
+    vibrate(10);
 }
 
 // ============================================
@@ -1841,7 +1917,7 @@ dom.editSplitBtn.addEventListener('click', () => {
     editState.splits.sort((a, b) => a - b);
     renderSegments();
     updateEditButtons();
-    if (navigator.vibrate) navigator.vibrate(15);
+    vibrate(15);
 });
 
 // ---- Delete selected segment ----
@@ -1862,7 +1938,7 @@ dom.editDeleteBtn.addEventListener('click', () => {
     }
     renderSegments();
     updateEditButtons();
-    if (navigator.vibrate) navigator.vibrate(10);
+    vibrate(10);
 });
 
 // ---- Undo ----
@@ -1874,7 +1950,7 @@ dom.editUndoBtn.addEventListener('click', () => {
     editState.selectedSegment = -1;
     renderSegments();
     updateEditButtons();
-    if (navigator.vibrate) navigator.vibrate(10);
+    vibrate(10);
 });
 
 function pushEditHistory() {
@@ -1915,7 +1991,7 @@ function renderSegments() {
             editState.selectedSegment = editState.selectedSegment === i ? -1 : i;
             renderSegments();
             updateEditButtons();
-            if (navigator.vibrate) navigator.vibrate(5);
+            vibrate(5);
         });
         dom.timelineSegments.appendChild(div);
     });
@@ -1956,7 +2032,7 @@ function renderSegments() {
             dom.editPreview.currentTime = seg.start;
             renderSegments();
             updateEditButtons();
-            if (navigator.vibrate) navigator.vibrate(5);
+            vibrate(5);
         });
 
         dom.segmentList.appendChild(item);
@@ -2020,6 +2096,9 @@ async function exportEdit() {
     }
 
     // Switch to progress screen
+    const job = newJob();
+    state.compressing = true;
+    await acquireWakeLock();
     goToScreen(2);
     dom.progressStatus.textContent = 'Writing file...';
     updateProgress(0);
@@ -2069,11 +2148,13 @@ async function exportEdit() {
             if (ret !== 0) throw new Error('Trim failed');
             mode = 'reencode';
         }
+        if (!jobAlive(job)) return;
 
         updateProgress(95);
         dom.progressStatus.textContent = 'Reading output...';
 
         const data = await ffmpeg.readFile('output.mp4');
+        if (!jobAlive(job)) return;
         state.outputBlob = new Blob([data], { type: 'video/mp4' });
 
         await ffmpeg.deleteFile(inputName).catch(() => {});
@@ -2081,13 +2162,18 @@ async function exportEdit() {
         state.fileWritten = false; // input was deleted; don't let compression reuse it
 
         updateProgress(100);
+        state.compressing = false;
+        releaseWakeLock();
         showEditDone(mode, (Date.now() - exportStart) / 1000);
     } catch (err) {
+        if (!jobAlive(job)) return; // cancelled — terminated worker rejects here
         ffmpeg.off('progress', progressHandler);
         console.error('Export failed:', err);
         await ffmpeg.deleteFile(inputName).catch(() => {});
         await ffmpeg.deleteFile('output.mp4').catch(() => {});
         state.fileWritten = false;
+        state.compressing = false;
+        releaseWakeLock();
 
         // Same rationale as compression: wasm chokes on inputs that native
         // ffmpeg handles fine — retry the trim on the server.
@@ -2127,6 +2213,8 @@ function buildTrimArgs(input, segments, withAudio) {
 // Server-side trim for files too big for the wasm heap (or when wasm fails).
 // Mirrors startServerCompression: upload → POST /trim → download result.
 async function startServerTrim(segments) {
+    const job = newJob();
+    const signal = activeFetchCtrl.signal;
     state.compressing = true;
     await acquireWakeLock();
     goToScreen(2);
@@ -2138,6 +2226,7 @@ async function startServerTrim(segments) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_id: fileId, filename, segments: payload }),
+        signal,
     });
 
     try {
@@ -2160,6 +2249,7 @@ async function startServerTrim(segments) {
             dom.progressStatus.textContent = `Uploading ${formatBytes(state.file.size)}...`;
             updateProgress(0);
             const up = await uploadFileToServer(state.file, startTime);
+            if (!jobAlive(job)) return;
             updateProgress(45);
             dom.progressStatus.textContent = 'Trimming on server...';
             const res = await requestTrim(up.id, up.filename);
@@ -2169,18 +2259,22 @@ async function startServerTrim(segments) {
             }
             trimRes = res;
         }
+        if (!jobAlive(job)) return;
 
         const trimData = await trimRes.json();
         updateProgress(80);
 
         dom.progressStatus.textContent = `Downloading ${formatBytes(trimData.size)}...`;
-        const fileRes = await fetch(`${DL_API}/file/${trimData.id}/${encodeURIComponent(trimData.filename)}`);
+        const fileRes = await fetch(`${DL_API}/file/${trimData.id}/${encodeURIComponent(trimData.filename)}`, { signal });
         if (!fileRes.ok) throw new Error('Could not download trimmed file');
 
-        state.outputBlob = new Blob([await fileRes.blob()], { type: 'video/mp4' });
+        const blob = await fileRes.blob();
+        if (!jobAlive(job)) return;
+        state.outputBlob = new Blob([blob], { type: 'video/mp4' });
         updateProgress(100);
         showEditDone('server', (Date.now() - startTime) / 1000);
     } catch (err) {
+        if (!jobAlive(job)) return; // cancelled
         console.error('Server trim failed:', err);
         dom.progressStatus.textContent = 'Error: ' + err.message;
     }
@@ -2229,7 +2323,7 @@ function showEditDone(mode = 'copy', encodeTime = 0) {
     s('statSpeed', isCopy || encodeTime === 0 ? 'N/A' : `${(keptDuration / encodeTime).toFixed(1)}x`);
     s('statExplainer', explainers[mode] || explainers.copy);
 
-    if (navigator.vibrate) navigator.vibrate([50, 50, 100]);
+    vibrate([50, 50, 100]);
     goToScreen(3);
 }
 

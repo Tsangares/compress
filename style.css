@@ -632,12 +632,11 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     display: none;
 }
 
-/* ---- Resume card ---- */
+/* ---- Resume card ----
+   In-flow flex child pinned below the scroller (.screen-inner shrinks to
+   make room) — an absolute overlay here covers the About link. */
 .resume-card {
-    position: absolute;
-    bottom: 60px;
-    left: 24px;
-    right: 24px;
+    margin: 8px 24px calc(12px + var(--safe-b));
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -693,12 +692,9 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
 
 .resume-btn:active { transform: scale(0.94); }
 
-/* Install prompt (mobile PWA) — sibling to resume-card, lives at bottom */
+/* Install prompt (mobile PWA) — sibling to resume-card, stacks below it */
 .install-card {
-    position: absolute;
-    left: 24px;
-    right: 24px;
-    bottom: calc(60px + var(--safe-b));
+    margin: 8px 24px calc(12px + var(--safe-b));
     display: flex;
     align-items: center;
     gap: 12px;
@@ -708,7 +704,6 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     box-shadow: var(--shadow-lg);
     border: 1.5px solid var(--border-strong);
     animation: slideUp 0.35s var(--spring);
-    z-index: 5;
 }
 .install-card.hidden { display: none; }
 
@@ -782,8 +777,8 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
 .install-card.webview .install-btn { display: none; }
 .install-card.webview .install-icon { background: var(--text-2); }
 
-/* When resume-card is visible too, lift install higher */
-.resume-card:not(.hidden) ~ .install-card { bottom: calc(140px + var(--safe-b)); }
+/* When resume-card is visible too, tighten the stack gap */
+.resume-card:not(.hidden) ~ .install-card { margin-top: 0; }
 
 /* ======================================================
    Screen 2 — Options
