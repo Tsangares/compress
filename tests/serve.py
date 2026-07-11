@@ -43,17 +43,22 @@ def make_handler(root: Path, backend: str):
 
         def do_GET(self):
             if self.path.startswith("/api/"):
-                return self._proxy("GET")
+                return self._proxy("GET", strip_prefix=True)
+            if self.path.startswith("/v/"):
+                return self._proxy("GET", strip_prefix=False)
             return super().do_GET()
 
         def do_POST(self):
             if self.path.startswith("/api/"):
-                return self._proxy("POST")
+                return self._proxy("POST", strip_prefix=True)
             self.send_error(405, "POST not supported outside /api/")
 
-        def _proxy(self, method: str):
-            # Strip the leading /api prefix, mirroring prod Caddy's reverse_proxy.
-            upstream_path = self.path[len("/api") :] or "/"
+        def _proxy(self, method: str, strip_prefix: bool = True):
+            # /api/* mirrors prod Caddy's reverse_proxy, which strips the /api
+            # prefix before forwarding. /v/* mirrors prod Caddy's *other* route,
+            # which forwards to the backend with the path unchanged (backend
+            # route: @app.get("/v/{share_id}") in dl-service.py).
+            upstream_path = (self.path[len("/api") :] or "/") if strip_prefix else self.path
             upstream_url = backend.rstrip("/") + upstream_path
 
             content_length = int(self.headers.get("Content-Length", 0) or 0)

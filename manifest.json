@@ -1,7 +1,7 @@
 {
     "name": "Compress",
     "short_name": "Compress",
-    "description": "Compress videos on your device. No uploads, no servers.",
+    "description": "Compress videos in your browser. Small files stay on-device; big ones use a server that auto-deletes them.",
     "start_url": "/",
     "display": "standalone",
     "orientation": "any",

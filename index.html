@@ -6,10 +6,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="theme-color" content="#FAF8F5">
-    <meta name="description" content="Compress videos instantly on your device. No uploads, no servers.">
+    <meta name="description" content="Compress videos in your browser with FFmpeg.wasm — free, no account. Under 50 MB nothing is uploaded; bigger files use a small server that deletes them within 30 minutes.">
     <title>Compress — shrink videos without uploading them</title>
     <meta property="og:title" content="Compress — shrink videos without uploading them">
-    <meta property="og:description" content="Compress videos right in your browser using FFmpeg.wasm. Nothing is uploaded. 100% on-device.">
+    <meta property="og:description" content="Compress videos right in your browser using FFmpeg.wasm. Files under 50 MB never leave your device; bigger ones use a small server, deleted within 30 minutes.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://compress.applesauce.chat/">
     <meta property="og:site_name" content="compress.applesauce.chat">
@@ -17,7 +17,7 @@
     <meta property="og:image:type" content="image/png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Compress — shrink videos without uploading them">
-    <meta name="twitter:description" content="Compress videos right in your browser using FFmpeg.wasm. Nothing is uploaded. 100% on-device.">
+    <meta name="twitter:description" content="Compress videos right in your browser using FFmpeg.wasm. Files under 50 MB never leave your device; bigger ones use a small server, deleted within 30 minutes.">
     <meta name="twitter:image" content="https://compress.applesauce.chat/screenshot.png">
     <link rel="canonical" href="https://compress.applesauce.chat/">
     <link rel="manifest" href="manifest.json">
@@ -59,7 +59,7 @@
                     <div class="url-divider"><span>or paste a link</span></div>
                     <div class="url-input-wrap">
                         <input type="url" id="urlInput" class="url-input" placeholder="https://youtube.com/watch?v=..." autocomplete="off" autocapitalize="off" spellcheck="false">
-                        <button class="url-go-btn" id="urlGoBtn">
+                        <button class="url-go-btn" id="urlGoBtn" aria-label="Fetch link">
                             <svg viewBox="0 0 20 20" fill="none"><path d="M4 10h12M12 6l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         </button>
                     </div>
@@ -109,7 +109,7 @@
                     </div>
                     <div class="spec-row">
                         <span class="spec-key">data</span>
-                        <span class="spec-val">0 bytes uploaded. service-worker cache, that's it.</span>
+                        <span class="spec-val">0 bytes uploaded under 50 MB. bigger files &amp; links use the server, wiped in ~30 min.</span>
                     </div>
                 </section>
 
@@ -150,7 +150,7 @@
         <!-- Screen 2: Options -->
         <div id="screen-options" class="screen" data-screen="1">
             <div class="screen-nav">
-                <button class="nav-back" data-back>
+                <button class="nav-back" data-back aria-label="Back">
                     <svg viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
                 <span class="nav-title">Settings</span>
@@ -316,9 +316,7 @@
                         </div>
                     </div>
 
-                    <div class="savings-badge">
-                        <span id="savingsPercent">--</span> smaller
-                    </div>
+                    <div class="savings-badge" id="savingsBadge">--</div>
                 </div>
 
                 <!-- Compression Stats -->
@@ -422,10 +420,10 @@
         <!-- Screen 6: Edit / Trim -->
         <div id="screen-edit" class="screen" data-screen="5">
             <div class="screen-nav">
-                <button class="nav-back" id="editBack">
+                <button class="nav-back" id="editBack" aria-label="Back">
                     <svg viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
-                <span class="nav-title">Edit</span>
+                <span class="nav-title">Trim &amp; Split</span>
                 <div class="nav-spacer"></div>
             </div>
 
@@ -442,7 +440,7 @@
 
                 <!-- Playback controls -->
                 <div class="edit-controls">
-                    <button class="edit-ctrl-btn" id="editPlayBtn">
+                    <button class="edit-ctrl-btn" id="editPlayBtn" aria-label="Play or pause">
                         <svg id="editPlayIcon" viewBox="0 0 24 24" fill="none"><path d="M6 4l14 8-14 8V4z" fill="currentColor"/></svg>
                         <svg id="editPauseIcon" viewBox="0 0 24 24" fill="none" class="hidden"><rect x="5" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="15" y="4" width="4" height="16" rx="1" fill="currentColor"/></svg>
                     </button>
@@ -451,13 +449,13 @@
                 <!-- Timeline -->
                 <div class="timeline-container">
                     <div class="timeline-zoom-bar">
-                        <button class="zoom-btn" id="zoomOutBtn">
+                        <button class="zoom-btn" id="zoomOutBtn" aria-label="Zoom out">
                             <svg viewBox="0 0 20 20" fill="none"><path d="M5 10h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                         </button>
                         <div class="zoom-track" id="zoomTrack">
                             <div class="zoom-fill" id="zoomFill"></div>
                         </div>
-                        <button class="zoom-btn" id="zoomInBtn">
+                        <button class="zoom-btn" id="zoomInBtn" aria-label="Zoom in">
                             <svg viewBox="0 0 20 20" fill="none"><path d="M10 5v10M5 10h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                         </button>
                         <span class="zoom-label" id="zoomLabel">1x</span>
@@ -501,7 +499,7 @@
         <!-- Screen 5: About -->
         <div id="screen-about" class="screen" data-screen="4">
             <div class="screen-nav">
-                <button class="nav-back" data-back-home>
+                <button class="nav-back" data-back-home aria-label="Back">
                     <svg viewBox="0 0 24 24" fill="none"><path d="M15 19l-7-7 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
                 <span class="nav-title">About</span>
@@ -512,9 +510,9 @@
                 <div class="about-content">
                     <h2>No ads. No tracking.<br>No accounts.</h2>
 
-                    <p>Compression runs in your browser. The video never leaves your device unless <em>you</em> choose to share it.</p>
+                    <p>For videos under 50 MB, compression happens entirely in your browser — the file never leaves your device. Bigger files (or ones the browser engine can't decode) are compressed on a small server and deleted within 30 minutes.</p>
 
-                    <p>Why? Compression is solved. FFmpeg has been doing this for 25 years. There's no reason to upload your private clips to some server, wait in a queue, and download a watermarked result.</p>
+                    <p>Why? Compression is solved. FFmpeg has been doing this for 25 years. No queues, no watermarks, no accounts — and most of the time, no upload at all.</p>
 
                     <div class="about-divider"></div>
 
@@ -530,9 +528,9 @@
                     <div class="about-divider"></div>
 
                     <h3>How it works</h3>
-                    <p>FFmpeg.wasm runs entirely in your browser. The ~30 MB engine downloads once and gets cached. After that, compression works offline.</p>
+                    <p>FFmpeg.wasm runs entirely in your browser. The ~31 MB engine downloads once and gets cached. After that, compression works offline.</p>
 
-                    <p>The link-download &amp; share features run on a small server because browsers can't fetch files from third-party sites. Files dropped into the share bucket auto-delete after 7 days — no permanent storage, no accounts.</p>
+                    <p>The link-download &amp; share features run on a small server because browsers can't fetch files from third-party sites. Files over 50 MB (or ones the browser build can't decode) also compress on the server, with the same ~30-minute cleanup. Shares auto-delete after 7 days — no permanent storage, no accounts.</p>
 
                     <p>No login. No "premium tier." No "3 free conversions." Just pick a video and go.</p>
 

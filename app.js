@@ -82,7 +82,7 @@ const dom = {
     cancelBtn: $('#cancelBtn'),
     beforeSize: $('#beforeSize'),
     afterSize: $('#afterSize'),
-    savingsPercent: $('#savingsPercent'),
+    savingsBadge: $('#savingsBadge'),
     saveBtn: $('#saveBtn'),
     shareBtn: $('#shareBtn'),
     shareLinkBtn: $('#shareLinkBtn'),
@@ -139,6 +139,27 @@ function vibrate(pattern) {
     try { navigator.vibrate(pattern); } catch (_) { /* ignore */ }
 }
 
+// Server errors carry raw ffmpeg/yt-dlp stderr in err.message — useful in the
+// console, hostile on screen. Log the real error, show a human one.
+function friendlyError(err, context) {
+    console.error(`[${context}]`, err);
+    const msg = (err && err.message) || '';
+    if (/unsupported url/i.test(msg)) return "That link isn't supported — try a TikTok, YouTube, Instagram, or X link.";
+    if (/private|sign in|log ?in|age.?restrict/i.test(msg)) return "That video looks private or restricted — can't fetch it.";
+    if (/unavailable|removed|not found|404|410/i.test(msg)) return 'Video unavailable — it may have been removed or expired.';
+    if (/quota|memory|allocat|out of bounds/i.test(msg)) return 'Ran out of memory — try a lower quality or a shorter clip.';
+    if (/failed to fetch|network|load failed/i.test(msg)) return 'Network hiccup — check your connection and try again.';
+    if (/too large|413/i.test(msg)) return msg; // size-limit messages are already specific
+    const FRIENDLY = {
+        compress: "Couldn't compress that video — try a different quality preset or another file.",
+        trim: "Couldn't export the edit — try again, or re-open the editor and redo your cuts.",
+        url: "Couldn't fetch that link — check that it's public and try again.",
+        share: 'Could not create the share link — try again in a moment.',
+        shared: "Couldn't load the shared video — it may have expired.",
+    };
+    return FRIENDLY[context] || 'Something went wrong — please try again.';
+}
+
 // ============================================
 // Screen Navigation
 // ============================================
@@ -192,7 +213,11 @@ window.addEventListener('popstate', (e) => {
 // File Handling
 // ============================================
 function handleFile(file) {
-    if (!file || !file.type.startsWith('video/')) return;
+    if (!file) return;
+    if (!file.type.startsWith('video/')) {
+        showToast(`"${file.name}" isn't a video file — pick a video to compress.`);
+        return;
+    }
     state.file = file;
     state.fileWritten = false;
 
@@ -352,7 +377,7 @@ async function startUrlDownload() {
         setHomeCompact(true);
     } catch (err) {
         urlDom.status.classList.add('error');
-        urlDom.statusText.textContent = err.message;
+        urlDom.statusText.textContent = friendlyError(err, 'url');
     }
 
     urlDom.goBtn.disabled = false;
@@ -392,7 +417,7 @@ urlDom.shareBtn.addEventListener('click', async () => {
         urlDom.shareHint.textContent = `Link expires in 7 days • ${fullUrl}`;
     } catch (err) {
         urlDom.shareLabel.textContent = 'Failed';
-        urlDom.shareHint.textContent = err.message || 'Could not create share link.';
+        urlDom.shareHint.textContent = friendlyError(err, 'share');
     } finally {
         setTimeout(() => {
             urlDom.shareBtn.disabled = false;
@@ -432,7 +457,7 @@ urlDom.audioBtn.addEventListener('click', async () => {
         urlDom.statusText.textContent = `Saved ${data.filename} (${formatBytes(data.size)})`;
     } catch (err) {
         urlDom.status.classList.add('error');
-        urlDom.statusText.textContent = err.message;
+        urlDom.statusText.textContent = friendlyError(err, 'url');
     }
 
     urlDom.audioBtn.disabled = false;
@@ -781,7 +806,9 @@ function notifyCompletion(savings) {
     if (document.visibilityState === 'visible') return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     new Notification('Compression complete', {
-        body: `Your video is ${savings}% smaller. Tap to save.`,
+        body: savings > 0
+            ? `Your video is ${savings}% smaller. Tap to save.`
+            : 'Done — the source was already well compressed. Tap to review.',
         icon: 'icon-192.png',
         tag: 'compress-done',
     });
@@ -930,7 +957,7 @@ async function startCompression() {
             return startServerCompression();
         }
 
-        dom.progressStatus.textContent = 'Error: ' + err.message;
+        dom.progressStatus.textContent = friendlyError(err, 'compress');
     }
 
     state.compressing = false;
@@ -1040,8 +1067,7 @@ async function startServerCompression() {
         showDone(encodeTime);
     } catch (err) {
         if (!jobAlive(job)) return; // cancelled — aborted fetch/xhr lands here
-        console.error('Server compression failed:', err);
-        dom.progressStatus.textContent = 'Error: ' + err.message;
+        dom.progressStatus.textContent = friendlyError(err, 'compress');
     }
 
     state.compressing = false;
@@ -1120,7 +1146,7 @@ function showDone(encodeTimeSec) {
     // Hero comparison
     dom.beforeSize.textContent = formatBytes(originalSize);
     dom.afterSize.textContent = formatBytes(compressedSize);
-    dom.savingsPercent.textContent = `${savings}%`;
+    const grew = setSavingsBadge(originalSize, compressedSize);
 
     // Input stats
     const s = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
@@ -1148,7 +1174,7 @@ function showDone(encodeTimeSec) {
     s('statOutBitrate', formatBitrate(outBitrateKbps));
     const ratio = (originalSize / compressedSize).toFixed(1);
     s('statRatio', `${ratio}:1`);
-    s('statSaved', formatBytes(originalSize - compressedSize));
+    s('statSaved', grew ? `+${formatBytes(compressedSize - originalSize)} (grew)` : formatBytes(originalSize - compressedSize));
 
     // Time stats
     const encodeMin = Math.floor(encodeTimeSec / 60);
@@ -1168,11 +1194,24 @@ function showDone(encodeTimeSec) {
         explainer += ` Resolution was scaled to ${preset.scale}p to reduce file size further.`;
     }
     explainer += ' Container uses "faststart" flag to move the moov atom to the front, allowing playback to begin before the full file downloads.';
+    if (grew) {
+        explainer += ' Note: this clip was already efficiently compressed, so re-encoding at this preset produced a larger file — try the Low or <10 MB preset, or keep the original.';
+    }
     s('statExplainer', explainer);
 
     notifyCompletion(savings);
     vibrate([50, 50, 100]);
     goToScreen(3);
+}
+
+// Size-delta badge on the done screen. Honest about growth: re-encoding an
+// already-efficient source can produce a LARGER file — don't call it smaller.
+function setSavingsBadge(originalSize, outputSize) {
+    const pct = Math.abs((1 - outputSize / originalSize) * 100).toFixed(1);
+    const grew = outputSize >= originalSize;
+    dom.savingsBadge.textContent = grew ? `${pct}% larger` : `${pct}% smaller`;
+    dom.savingsBadge.classList.toggle('grew', grew);
+    return grew;
 }
 
 function formatBitrate(kbps) {
@@ -1260,7 +1299,7 @@ dom.shareLinkBtn.addEventListener('click', async () => {
         await presentShareUrl(url, dom.shareLinkLabel, dom.shareHint, origLabel);
     } catch (err) {
         dom.shareLinkLabel.textContent = 'Failed';
-        dom.shareHint.textContent = err.message || 'Could not create share link.';
+        dom.shareHint.textContent = friendlyError(err, 'share');
     } finally {
         setTimeout(() => {
             dom.shareLinkBtn.disabled = false;
@@ -1280,7 +1319,7 @@ dom.shareOriginalBtn.addEventListener('click', async () => {
         await presentShareUrl(url, dom.shareOriginalLabel, dom.shareOriginalHint, origLabel);
     } catch (err) {
         dom.shareOriginalLabel.textContent = 'Failed';
-        dom.shareOriginalHint.textContent = err.message || 'Could not create share link.';
+        dom.shareOriginalHint.textContent = friendlyError(err, 'share');
     } finally {
         setTimeout(() => {
             dom.shareOriginalBtn.disabled = false;
@@ -1483,6 +1522,21 @@ dom.editPlayBtn.addEventListener('click', () => {
         dom.editPreview.pause();
     } else {
         dom.editPreview.play();
+    }
+});
+
+// Keyboard: space = play/pause, arrows = nudge 1s (shift: 0.1s) — editor only
+document.addEventListener('keydown', (e) => {
+    if (state.currentScreen !== 5) return;
+    if (e.target.matches('input, textarea, select')) return;
+    if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault();
+        dom.editPlayBtn.click();
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const step = (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 0.1 : 1);
+        const t = Math.min(Math.max(dom.editPreview.currentTime + step, 0), state.duration || dom.editPreview.duration || 0);
+        dom.editPreview.currentTime = t;
     }
 });
 
@@ -1778,12 +1832,22 @@ function generateThumbnails() {
     tmpVideo.playsInline = true;
     tmpVideo.src = dom.editPreview.src;
 
+    // One-time zoom UI reset for the fresh editor session (finish() must NOT
+    // touch these — it can run while the user is already zooming).
+    dom.zoomFill.style.width = '0%';
+    dom.zoomLabel.textContent = '1x';
+
     const signal = thumbGenAbort.signal;
     let i = 0;
     let pendingSeek = false;
     let seekWatchdog = null;
+    let finished = false;
 
     function finish() {
+        // Re-entry guard: clearing tmpVideo.src below fires its own 'error'
+        // event, which would re-invoke finish() via onerror — forever.
+        if (finished) return;
+        finished = true;
         editState.thumbsGenerated = true;
         // Cache base thumbnails as a canvas (cheaper than ImageData)
         const cache = document.createElement('canvas');
@@ -1792,10 +1856,11 @@ function generateThumbnails() {
         cache.getContext('2d').drawImage(canvas, 0, 0);
         editState.baseThumbCanvas = cache;
         clearTimeout(seekWatchdog);
+        tmpVideo.onerror = null;
+        tmpVideo.onseeked = null;
+        tmpVideo.onloadeddata = null;
         tmpVideo.src = '';
         renderRuler(totalW);
-        dom.zoomFill.style.width = '0%';
-        dom.zoomLabel.textContent = '1x';
     }
 
     // Some inputs decode in <video> but stall on seeks (fragmented MP4s,
@@ -2186,7 +2251,7 @@ async function exportEdit() {
             dom.progressStatus.textContent = 'Retrying on server…';
             return startServerTrim(segments);
         }
-        dom.progressStatus.textContent = 'Error: ' + err.message;
+        dom.progressStatus.textContent = friendlyError(err, 'trim');
     }
 }
 
@@ -2280,8 +2345,7 @@ async function startServerTrim(segments) {
         showEditDone('server', (Date.now() - startTime) / 1000);
     } catch (err) {
         if (!jobAlive(job)) return; // cancelled
-        console.error('Server trim failed:', err);
-        dom.progressStatus.textContent = 'Error: ' + err.message;
+        dom.progressStatus.textContent = friendlyError(err, 'trim');
     }
 
     state.compressing = false;
@@ -2291,7 +2355,6 @@ async function startServerTrim(segments) {
 function showEditDone(mode = 'copy', encodeTime = 0) {
     const originalSize = state.file.size;
     const outputSize = state.outputBlob.size;
-    const savings = ((1 - outputSize / originalSize) * 100).toFixed(1);
 
     // Calculate kept duration
     const keptSegments = getSegments().filter((_, i) => !editState.deletedSegments.has(i));
@@ -2299,7 +2362,7 @@ function showEditDone(mode = 'copy', encodeTime = 0) {
 
     dom.beforeSize.textContent = formatBytes(originalSize);
     dom.afterSize.textContent = formatBytes(outputSize);
-    dom.savingsPercent.textContent = `${savings}%`;
+    setSavingsBadge(originalSize, outputSize);
 
     const isCopy = mode === 'copy';
     const cuts = `${editState.splits.length} cut${editState.splits.length !== 1 ? 's' : ''} removed ${formatDuration(state.duration - keptDuration)} of footage.`;
@@ -2474,7 +2537,7 @@ async function consumeSharedVideo() {
         handleFile(file);
     } catch (err) {
         urlDom.status.classList.add('error');
-        urlDom.statusText.textContent = err.message || 'Could not load shared video';
+        urlDom.statusText.textContent = friendlyError(err, 'shared');
     }
 }
 consumeSharedVideo();
@@ -2511,7 +2574,7 @@ async function startUrlAudioShare(url) {
         setHomeCompact(true);
     } catch (err) {
         urlDom.status.classList.add('error');
-        urlDom.statusText.textContent = err.message;
+        urlDom.statusText.textContent = friendlyError(err, 'shared');
     } finally {
         urlDom.input.disabled = false;
     }

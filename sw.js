@@ -1,4 +1,4 @@
-const CACHE_NAME = 'compress-v31';
+const CACHE_NAME = 'compress-v32';
 const SHARE_PROBE_CACHE = 'share-probe-v1';
 
 // Large files that rarely change — cache-first (avoid re-downloading 31MB WASM)

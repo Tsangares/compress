@@ -1,9 +1,10 @@
-.claude/
+*.bak.*
 .claude*
+.claude/
 CLAUDE.md
 lib/
-__pycache__/
 *.pyc
-*.bak.*
+__pycache__/
 tests/fixtures/
 tests/screenshots/
+tests/.sweep/
