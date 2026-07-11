@@ -164,18 +164,15 @@ function updateResumeCard(screenIndex) {
     }
 }
 
-// System back button / swipe-back gesture
+// Where the system back button / swipe-back gesture returns to, per screen.
+// (0 select, 1 options, 2 progress, 3 done, 4 about, 5 edit)
+// Screens without an entry fall back to the previous index.
+const SCREEN_BACK = { 3: 0, 4: 0, 5: 1 };
+
 window.addEventListener('popstate', (e) => {
     if (state.currentScreen > 0) {
-        if (state.currentScreen === 4) {
-            goToScreen(0, false); // About → home
-        } else if (state.currentScreen === 3) {
-            goToScreen(0, false); // Done → home
-        } else if (state.currentScreen === 5) {
-            goToScreen(1, false); // Edit → options
-        } else {
-            goToScreen(state.currentScreen - 1, false);
-        }
+        const target = SCREEN_BACK[state.currentScreen] ?? state.currentScreen - 1;
+        goToScreen(target, false);
     }
 });
 
@@ -378,24 +375,8 @@ urlDom.shareBtn.addEventListener('click', async () => {
         const data = await resp.json();
         const fullUrl = new URL(data.share_url || data.url, window.location.origin).toString();
 
-        if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
-            try {
-                await navigator.share({ url: fullUrl });
-                urlDom.shareLabel.textContent = 'Shared!';
-            } catch (err) {
-                if (err.name !== 'AbortError') {
-                    await navigator.clipboard.writeText(fullUrl);
-                    urlDom.shareLabel.textContent = 'Link copied';
-                } else {
-                    urlDom.shareLabel.textContent = origLabel;
-                }
-            }
-        } else {
-            await navigator.clipboard.writeText(fullUrl);
-            urlDom.shareLabel.textContent = 'Link copied';
-        }
-
-        if (navigator.vibrate) navigator.vibrate(10);
+        await presentShareUrl(fullUrl, urlDom.shareLabel, urlDom.shareHint, origLabel);
+        // presentShareUrl sets a plain expiry hint; keep the URL-including one.
         urlDom.shareHint.textContent = `Link expires in 7 days • ${fullUrl}`;
     } catch (err) {
         urlDom.shareLabel.textContent = 'Failed';
@@ -1086,7 +1067,6 @@ function showDone(encodeTimeSec) {
     // Encoding stats
     s('statCodec', 'H.264 (libx264)');
     if (state.quality === 'target') {
-        const targetBitrate = Math.floor((preset.targetMB * 1024 * 1024 * 8) / state.duration / 1000);
         s('statMode', `Target size (${preset.targetMB} MB)`);
     } else {
         s('statMode', `CRF ${preset.crf} (${state.quality})`);
@@ -1448,8 +1428,11 @@ function updatePlayhead(t) {
         const pct = (t / state.duration) * 100;
         dom.timelinePlayhead.style.left = `${pct}%`;
 
-        // Auto-scroll timeline to follow playhead during playback
-        if (editState.playing) {
+        // Auto-scroll timeline to follow playhead during playback — but not
+        // while the user is touching/scrubbing the timeline or has manually
+        // scrolled it within the last 600ms (avoids yanking it from under them).
+        if (editState.playing && !gestureActive() &&
+            performance.now() - lastManualScroll > 600) {
             const trackW = dom.timelineTrack.offsetWidth;
             const scrollW = dom.timelineScroll.clientWidth;
             const playheadX = (t / state.duration) * trackW;
@@ -1457,40 +1440,166 @@ function updatePlayhead(t) {
 
             // If playhead is near the right edge, scroll to keep it centered
             if (playheadX > scrollLeft + scrollW * 0.75 || playheadX < scrollLeft + scrollW * 0.15) {
+                programmaticScroll = true;
                 dom.timelineScroll.scrollLeft = playheadX - scrollW * 0.3;
             }
         }
     }
 }
 
-// ---- Timeline touch/click scrubbing ----
-function scrubTimeline(e) {
-    const rect = dom.timelineTrack.getBoundingClientRect();
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const pct = Math.max(0, Math.min(1, x / rect.width));
-    const time = pct * state.duration;
-    dom.editPreview.currentTime = time;
+// ---- Timeline scrubbing & gestures (Pointer Events) ----
+//
+// Gesture arbitration on the timeline:
+//   * Mouse  -> press anywhere on the track scrubs; drag scrubs continuously.
+//   * Touch  -> single-finger drag pans (native pan-x scroll); a quick tap
+//               (<8px, <300ms) seeks; fine scrubbing is done by grabbing the
+//               playhead handle (touch-action:none, pointer-captured).
+//   * Pinch  -> two pointers zoom around their midpoint.
+// Seeks are throttled against the 'seeked' event so we never queue more than
+// one pending seek on the media element.
+
+// --- Seek throttling: at most one in-flight seek, chase the latest target ---
+let pendingSeekTime = null;
+let seekInFlight = false;
+
+function seekTo(time) {
+    time = Math.max(0, Math.min(state.duration, time));
+    pendingSeekTime = time;
     dom.editCurrentTime.textContent = formatDuration(time);
     updatePlayhead(time);
+    if (!seekInFlight) {
+        seekInFlight = true;
+        dom.editPreview.currentTime = time;
+    }
 }
 
-let scrubbing = false;
-dom.timelineScroll.addEventListener('mousedown', (e) => {
-    scrubbing = true;
-    scrubTimeline(e);
-});
-dom.timelineScroll.addEventListener('touchstart', (e) => {
-    // Only scrub with single touch (not pinch)
-    if (e.touches.length === 1) {
-        scrubbing = true;
-        scrubTimeline(e);
+dom.editPreview.addEventListener('seeked', () => {
+    if (pendingSeekTime !== null &&
+        Math.abs(pendingSeekTime - dom.editPreview.currentTime) > 0.02) {
+        // A newer scrub target arrived while seeking — chase it.
+        dom.editPreview.currentTime = pendingSeekTime;
+    } else {
+        seekInFlight = false;
+        pendingSeekTime = null;
     }
-}, { passive: true });
+});
 
-window.addEventListener('mousemove', (e) => { if (scrubbing) scrubTimeline(e); });
-window.addEventListener('touchmove', (e) => { if (scrubbing && e.touches.length === 1) scrubTimeline(e); }, { passive: true });
-window.addEventListener('mouseup', () => { scrubbing = false; });
-window.addEventListener('touchend', () => { scrubbing = false; });
+function timeFromClientX(clientX) {
+    const rect = dom.timelineTrack.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return pct * state.duration;
+}
+function scrubTo(clientX) { seekTo(timeFromClientX(clientX)); }
+
+// --- Shared gesture state (read by updatePlayhead's auto-scroll guard) ---
+const activePointers = new Map(); // pointerId -> {x, y}, tracked on the scroll el
+let mouseScrubbing = false;
+let draggingHandle = false;
+let touchStart = null;            // {id, x, y, t} for tap-vs-pan on touch
+let lastManualScroll = 0;
+let programmaticScroll = false;
+let pinchStartDist = 0;
+let pinchStartZoom = 1;
+
+function gestureActive() {
+    return mouseScrubbing || draggingHandle || activePointers.size > 0;
+}
+
+// --- Scrub / pan / pinch on the timeline body ---
+// Mouse is handled without pointer-capture (via window listeners below) so the
+// browser still delivers the 'click' that the segment overlay relies on for
+// selection. Only touch/pen pointers are tracked in activePointers.
+dom.timelineScroll.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse') {
+        mouseScrubbing = true;
+        scrubTo(e.clientX);
+        return;
+    }
+
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size === 2) {
+        // Second finger down -> pinch. Abandon any pending single-touch tap.
+        touchStart = null;
+        const pts = [...activePointers.values()];
+        pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        pinchStartZoom = editState.zoom;
+    } else if (activePointers.size === 1) {
+        // Defer — let native pan-x scroll happen; decide tap on pointerup.
+        touchStart = { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now() };
+    }
+});
+
+dom.timelineScroll.addEventListener('pointermove', (e) => {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size >= 2) {
+        // Pinch-zoom around the midpoint of the two pointers.
+        const pts = [...activePointers.values()];
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (pinchStartDist > 0) {
+            const rect = dom.timelineScroll.getBoundingClientRect();
+            const midX = (pts[0].x + pts[1].x) / 2;
+            const scrollMidX = midX - rect.left + dom.timelineScroll.scrollLeft;
+            const midPct = scrollMidX / dom.timelineTrack.offsetWidth;
+            setZoom(pinchStartZoom * (dist / pinchStartDist));
+            const newMidX = midPct * dom.timelineTrack.offsetWidth;
+            dom.timelineScroll.scrollLeft = newMidX - (midX - rect.left);
+        }
+        if (e.cancelable) e.preventDefault();
+    }
+    // Single touch: no-op — native pan-x handles horizontal scrolling.
+});
+
+function endTimelinePointer(e) {
+    if (!activePointers.has(e.pointerId)) return;
+    const wasTouch = touchStart && touchStart.id === e.pointerId;
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) pinchStartDist = 0;
+
+    // A quick, near-stationary touch that ended cleanly (not cancelled by a
+    // native pan) is a tap -> seek to that position.
+    if (wasTouch && e.type === 'pointerup' && activePointers.size === 0) {
+        const moved = Math.hypot(e.clientX - touchStart.x, e.clientY - touchStart.y);
+        const dt = performance.now() - touchStart.t;
+        if (moved < 8 && dt < 300) scrubTo(e.clientX);
+    }
+    if (wasTouch) touchStart = null;
+}
+dom.timelineScroll.addEventListener('pointerup', endTimelinePointer);
+dom.timelineScroll.addEventListener('pointercancel', endTimelinePointer);
+
+// Mouse scrubbing continues past the timeline edges (no pointer capture).
+window.addEventListener('pointermove', (e) => {
+    if (mouseScrubbing && e.pointerType === 'mouse') scrubTo(e.clientX);
+});
+window.addEventListener('pointerup', (e) => {
+    if (e.pointerType === 'mouse') mouseScrubbing = false;
+});
+
+// --- Playhead handle: fine scrubbing without scrolling (touch-action:none) ---
+dom.timelinePlayhead.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); // don't also start a track scrub/pan
+    draggingHandle = true;
+    dom.timelinePlayhead.setPointerCapture(e.pointerId);
+    if (e.cancelable) e.preventDefault();
+    scrubTo(e.clientX);
+});
+dom.timelinePlayhead.addEventListener('pointermove', (e) => {
+    if (!draggingHandle) return;
+    if (e.cancelable) e.preventDefault();
+    scrubTo(e.clientX);
+});
+function endHandlePointer(e) {
+    if (!draggingHandle) return;
+    draggingHandle = false;
+    if (dom.timelinePlayhead.hasPointerCapture &&
+        dom.timelinePlayhead.hasPointerCapture(e.pointerId)) {
+        dom.timelinePlayhead.releasePointerCapture(e.pointerId);
+    }
+}
+dom.timelinePlayhead.addEventListener('pointerup', endHandlePointer);
+dom.timelinePlayhead.addEventListener('pointercancel', endHandlePointer);
 
 // ---- Zoom controls ----
 dom.zoomInBtn.addEventListener('click', () => setZoom(editState.zoom * 1.5));
@@ -1514,43 +1623,12 @@ dom.timelineScroll.addEventListener('wheel', (e) => {
     }
 }, { passive: false });
 
-// Pinch-to-zoom on timeline
-let pinchStartDist = 0;
-let pinchStartZoom = 1;
-
-dom.timelineScroll.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 2) {
-        scrubbing = false;
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        pinchStartDist = Math.hypot(dx, dy);
-        pinchStartZoom = editState.zoom;
-    }
-}, { passive: true });
-
-dom.timelineScroll.addEventListener('touchmove', (e) => {
-    if (e.touches.length === 2) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const dist = Math.hypot(dx, dy);
-        const scale = dist / pinchStartDist;
-
-        // Zoom centered on pinch midpoint
-        const rect = dom.timelineScroll.getBoundingClientRect();
-        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const scrollMidX = midX - rect.left + dom.timelineScroll.scrollLeft;
-        const midPct = scrollMidX / dom.timelineTrack.offsetWidth;
-
-        setZoom(pinchStartZoom * scale);
-
-        const newMidX = midPct * dom.timelineTrack.offsetWidth;
-        dom.timelineScroll.scrollLeft = newMidX - (midX - rect.left);
-    }
-}, { passive: true });
-
-// Sync ruler with timeline scroll
+// Sync ruler with timeline scroll; record user-driven scrolls to suspend
+// playback auto-scroll (programmatic scrolls flag themselves to be ignored).
 dom.timelineScroll.addEventListener('scroll', () => {
     dom.timelineRuler.style.transform = `translateX(-${dom.timelineScroll.scrollLeft}px)`;
+    if (programmaticScroll) { programmaticScroll = false; return; }
+    lastManualScroll = performance.now();
 });
 
 function setZoom(newZoom) {

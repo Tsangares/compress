@@ -1765,6 +1765,9 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     overflow-y: hidden;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+    /* Let the browser own single-finger horizontal panning; JS handles taps,
+       mouse scrubbing and two-finger pinch-zoom. */
+    touch-action: pan-x;
     border-radius: var(--r);
     box-shadow: var(--shadow);
     border: 1.5px solid var(--border-strong);
@@ -1866,7 +1869,10 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     width: 2px;
     background: white;
     z-index: 5;
+    /* The thin line stays click-through; the ::after knob is the grab target
+       so it doesn't block taps/clicks on the timeline body or segments. */
     pointer-events: none;
+    touch-action: none;
     box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
     transition: left 0.05s linear;
 }
@@ -1882,6 +1888,20 @@ button, label, .quality-pills, .meta-strip, .screen-nav, .badge {
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
     border-top: 6px solid white;
+}
+
+/* Enlarged, invisible grab target around the playhead knob (~28px) so the
+   playhead can be dragged for fine scrubbing on touch without scrolling. */
+.timeline-playhead::after {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    width: 28px;
+    height: 26px;
+    transform: translateX(-50%);
+    pointer-events: auto;
+    cursor: ew-resize;
 }
 
 /* ---- Segment list ---- */
