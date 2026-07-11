@@ -15,19 +15,19 @@
     <style>
         :root {
             --bg: #FAF8F5;
-            --surface: #ffffff;
-            --text: #1a1a1a;
-            --text-2: #4a4a4a;
-            --text-3: #8a8a8a;
-            --border: rgba(26, 26, 26, 0.08);
-            --border-strong: rgba(26, 26, 26, 0.15);
+            --surface: #FFFFFF;
+            --text: #1A1A1A;
+            --text-2: #6B6B6B;
+            --text-3: #A0A0A0;
+            --border: rgba(0, 0, 0, 0.06);
+            --border-strong: rgba(0, 0, 0, 0.1);
             --accent: #F97316;
             --accent-soft: rgba(249, 115, 22, 0.08);
-            --success: #10b981;
+            --success: #10B981;
             --success-soft: rgba(16, 185, 129, 0.08);
-            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-            --r: 14px;
-            --font: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+            --r: 16px;
+            --font: 'Space Grotesk', -apple-system, system-ui, sans-serif;
         }
         @media (prefers-color-scheme: dark) {
             :root {
@@ -256,6 +256,7 @@
     </main>
     <div class="toast" id="toast">Copied</div>
 
+    <script src="/shared.js"></script>
     <script>
     (function() {
         const $ = (s) => document.querySelector(s);
@@ -277,10 +278,7 @@
 
         function fmtBytes(n) {
             if (!n) return '';
-            const u = ['B', 'KB', 'MB', 'GB'];
-            let i = 0;
-            while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-            return `${n.toFixed(n >= 100 ? 0 : 1)} ${u[i]}`;
+            return CompressShared.formatBytes(n);
         }
 
         function fmtExpires(expiresAtSec) {

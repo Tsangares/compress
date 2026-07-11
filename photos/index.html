@@ -15,7 +15,7 @@
             --text-2: #6B6B6B;
             --text-3: #A0A0A0;
             --accent: #F97316;
-            --border: rgba(0, 0, 0, 0.1);
+            --border: rgba(0, 0, 0, 0.06);
             --good: #10B981;
         }
         @media (prefers-color-scheme: dark) {
@@ -122,17 +122,17 @@
     </div>
 
 <script src="piexif.min.js"></script>
+<script src="/shared.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 let sourceBitmap = null, sourceName = 'photo.jpg', originalSize = 0;
 let outBlob = null, edge = 2560, quality = 0.80;
 let exifObj = null;        // parsed EXIF from the original (JPEG only)
 let sourceIsJpeg = false;
+const fmt = CompressShared.formatBytes;
 
-function fmt(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(0) + ' KB';
-    return (bytes / 1048576).toFixed(2) + ' MB';
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 async function loadShared() {

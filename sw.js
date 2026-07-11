@@ -16,6 +16,7 @@ const NETWORK_FIRST = [
     '/index.html',
     '/style.css',
     '/app.js',
+    '/shared.js',
     '/manifest.json',
     '/icon-192.png',
     '/icon-512.png',

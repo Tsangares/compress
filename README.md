@@ -44,8 +44,9 @@ Be specific about what hits the network and what doesn't:
 
 | Action | Network? |
 |---|---|
-| Upload a file from your device | **No.** The video is read into memory and processed by FFmpeg.wasm in the page. Zero bytes leave the browser. |
-| Paste a link | **Yes.** A small backend (yt-dlp on `mat`) downloads the video and serves it back to the browser. The browser then compresses locally. The server keeps the file ~5 minutes. |
+| Compress/trim a file under 50 MB | **No** (usually). The video is processed by FFmpeg.wasm in the page. If the wasm engine can't handle the input (odd codec, memory pressure), it retries on the server — the file is uploaded, processed with native FFmpeg, and swept within ~30 minutes. |
+| Compress/trim a file over 50 MB | **Yes.** Too big for the wasm heap — uploaded to the server (`/api/upload` → `/api/compress` or `/api/trim`), processed with native FFmpeg, downloaded back, swept within ~30 minutes. |
+| Paste a link | **Yes.** A small backend (yt-dlp on `mat`) downloads the video and serves it back to the browser. The browser then compresses locally. The server keeps the file ~30 minutes. |
 | Click "Share" on a result | **Yes.** Uploads the compressed output to a 7-day share URL with OG-tagged thumbnail. Optional — never automatic. |
 | Idle on the page | **No.** No analytics, no tracking, no telemetry, no cookies (only the service-worker cache). |
 
@@ -58,7 +59,7 @@ The FFmpeg `.wasm` bundle is the only resource pulled at first load; after that 
 - **Safari** (15+ desktop, 16+ iOS): full support, slower encode (no SIMD threading)
 - **In-app browsers** (Instagram, TikTok webview, etc.): often missing `SharedArrayBuffer` — falls back to single-threaded mode (still works, just slower)
 
-The WASM build requires `SharedArrayBuffer`, which means the page is served with COOP/COEP headers (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`).
+The bundled FFmpeg core is the single-threaded build, which works without `SharedArrayBuffer` — production currently serves no COOP/COEP headers and runs fine. Adding those headers (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`) is only needed if the multi-threaded core is ever adopted; the local test server (`tests/serve.py`) already sends them.
 
 ## Performance notes
 
