@@ -19,18 +19,20 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 import httpx
 
-DL_DIR = Path("/opt/compress-dl/downloads")
-DL_DIR.mkdir(exist_ok=True)
+DL_DIR = Path(os.environ.get("COMPRESS_DL_DIR", "/opt/compress-dl/downloads"))
+DL_DIR.mkdir(parents=True, exist_ok=True)
 
-SHARE_DIR = Path("/opt/compress-dl/shares")
-SHARE_DIR.mkdir(exist_ok=True)
+SHARE_DIR = Path(os.environ.get("COMPRESS_SHARE_DIR", "/opt/compress-dl/shares"))
+SHARE_DIR.mkdir(parents=True, exist_ok=True)
 
 CLEANUP_AGE = 1800  # 30 minutes for /downloads
+DL_SWEEP_INTERVAL = 600  # sweep every 10 minutes
 SHARE_TTL = 7 * 24 * 3600  # 7 days sliding window (resets on extend)
 SHARE_MAX_AGE = 30 * 24 * 3600  # absolute 30-day cap from share creation
 SHARE_MAX_BYTES = 200 * 1024 * 1024  # 200 MB per share
 SHARE_TOTAL_CAP = 5 * 1024 * 1024 * 1024  # 5 GB rolling cap across shares
 SHARE_SWEEP_INTERVAL = 600  # sweep every 10 minutes
+UPLOAD_MAX_BYTES = int(os.environ.get("COMPRESS_UPLOAD_MAX_BYTES", 500 * 1024 * 1024))
 
 PUBLIC_BASE = os.environ.get("COMPRESS_PUBLIC_BASE", "https://compress.applesauce.chat")
 VIEWER_TEMPLATE_PATH = Path(__file__).parent / "v" / "index.html"
@@ -41,11 +43,13 @@ if not VIEWER_TEMPLATE_PATH.exists():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(_share_sweeper())
+    share_task = asyncio.create_task(_share_sweeper())
+    dl_task = asyncio.create_task(_dl_sweeper())
     try:
         yield
     finally:
-        task.cancel()
+        share_task.cancel()
+        dl_task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -106,6 +110,27 @@ async def _has_audio_stream(path: Path) -> bool:
         proc.kill()
         return False
     return b"audio" in stdout
+
+
+async def _ffprobe_duration(path: Path) -> float:
+    """ffprobe a file's container duration in seconds. Returns 0.0 if it can't
+    be determined (missing/corrupt file, timeout, etc.)."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return 0.0
+    if proc.returncode != 0:
+        return 0.0
+    try:
+        return float(stdout.decode().strip())
+    except ValueError:
+        return 0.0
 
 
 # ============================================
@@ -318,7 +343,11 @@ async def get_info(req: InfoRequest):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise HTTPException(504, "Info fetch timed out")
 
     if proc.returncode != 0:
         raise HTTPException(400, f"Could not fetch info: {stderr.decode()[:200]}")
@@ -389,7 +418,11 @@ async def download(req: DownloadRequest):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise HTTPException(504, "Download timed out")
 
     if proc.returncode != 0:
         raise HTTPException(400, f"Download failed: {stderr.decode()[:300]}")
@@ -444,7 +477,12 @@ async def download_audio(req: DownloadRequest):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    except asyncio.TimeoutError:
+        proc.kill()
+        print(f"[audio] TIMEOUT url={req.url!r}", flush=True)
+        raise HTTPException(504, "Audio download timed out")
 
     if proc.returncode != 0:
         err = stderr.decode()[-600:]
@@ -483,7 +521,10 @@ MIME_BY_EXT = {
 async def get_file(file_id: str, filename: str):
     """Serve a downloaded file."""
     filepath = DL_DIR / file_id / filename
-    if not filepath.exists() or not filepath.is_relative_to(DL_DIR):
+    try:
+        if not filepath.is_file() or not filepath.resolve().is_relative_to(DL_DIR.resolve()):
+            raise HTTPException(404, "File not found")
+    except (OSError, ValueError):
         raise HTTPException(404, "File not found")
     ext = filepath.suffix.lower()
     media_type = MIME_BY_EXT.get(ext, "application/octet-stream")
@@ -555,9 +596,11 @@ async def api_mp3(url: str, format: str = "file"):
 
 
 QUALITY_MAP = {
+    # CRF values aligned with the client's wasm-path QUALITY_PRESETS (app.js)
+    # so server- and client-side compression produce comparable output sizes.
     "high":   {"crf": "23", "preset": "fast", "audio": "128k", "scale": None},
-    "medium": {"crf": "28", "preset": "medium", "audio": "96k", "scale": None},
-    "low":    {"crf": "32", "preset": "medium", "audio": "64k", "scale": "480"},
+    "medium": {"crf": "30", "preset": "medium", "audio": "96k", "scale": None},
+    "low":    {"crf": "34", "preset": "medium", "audio": "64k", "scale": "480"},
 }
 
 
@@ -566,6 +609,17 @@ class CompressRequest(BaseModel):
     filename: str
     quality: str = "medium"
     target_mb: float | None = None
+
+
+class TrimSegment(BaseModel):
+    start: float
+    end: float
+
+
+class TrimRequest(BaseModel):
+    file_id: str
+    filename: str
+    segments: list[TrimSegment]
 
 
 @app.post("/compress")
@@ -582,14 +636,9 @@ async def compress_video(req: CompressRequest):
 
     if req.target_mb:
         # Target size mode — calculate bitrate
-        # Get duration first
-        probe = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", str(input_path),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(probe.communicate(), timeout=30)
-        duration = float(stdout.decode().strip())
+        duration = await _ffprobe_duration(input_path)
+        if duration <= 0:
+            raise HTTPException(400, "could not determine video duration")
 
         target_bytes = req.target_mb * 1024 * 1024
         total_kbps = int((target_bytes * 8) / duration / 1000)
@@ -627,7 +676,11 @@ async def compress_video(req: CompressRequest):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise HTTPException(504, "Compression timed out")
 
     if proc.returncode != 0:
         raise HTTPException(500, f"Compression failed: {stderr.decode()[-300:]}")
@@ -640,6 +693,103 @@ async def compress_video(req: CompressRequest):
         "filename": out_name,
         "size": out_path.stat().st_size,
         "original_size": input_path.stat().st_size,
+    }
+
+
+@app.post("/trim")
+async def trim_video(req: TrimRequest):
+    """Server-side frame-accurate trim via native FFmpeg.
+
+    For files too large to trim in-browser (wasm heap OOMs above ~50MB), the
+    frontend routes here instead. Mirrors /compress's input validation and
+    response shape so the frontend can fetch the result the same way.
+    """
+    input_path = DL_DIR / req.file_id / req.filename
+    try:
+        if not input_path.is_file() or not input_path.resolve().is_relative_to(DL_DIR.resolve()):
+            raise HTTPException(404, "Input file not found")
+    except (OSError, ValueError):
+        raise HTTPException(404, "Input file not found")
+
+    if not req.segments:
+        raise HTTPException(400, "At least one segment is required")
+
+    segments = [(s.start, s.end) for s in req.segments]
+    prev_end = None
+    for start, end in segments:
+        if start < 0 or end <= start:
+            raise HTTPException(400, "Each segment must satisfy 0 <= start < end")
+        if prev_end is not None and start < prev_end:
+            raise HTTPException(400, "Segments must be sorted and non-overlapping")
+        prev_end = end
+
+    out_name = input_path.stem + "_trimmed.mp4"
+    out_path = DL_DIR / req.file_id / out_name
+
+    has_audio = await _has_audio_stream(input_path)
+
+    if len(segments) == 1 and segments[0][0] < 0.05:
+        # Fast path: single segment from (near) the start — stream copy, no re-encode.
+        end = segments[0][1]
+        args = [
+            "ffmpeg", "-i", str(input_path),
+            "-t", f"{end:.3f}", "-c", "copy", "-avoid_negative_ts", "make_zero",
+            "-y", str(out_path),
+        ]
+    else:
+        filter_parts = []
+        v_labels = []
+        a_labels = []
+        for i, (start, end) in enumerate(segments):
+            filter_parts.append(
+                f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[v{i}]"
+            )
+            v_labels.append(f"[v{i}]")
+            if has_audio:
+                filter_parts.append(
+                    f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[a{i}]"
+                )
+                a_labels.append(f"[a{i}]")
+
+        n = len(segments)
+        if has_audio:
+            concat_inputs = "".join(v + a for v, a in zip(v_labels, a_labels))
+            filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[v][a]")
+        else:
+            concat_inputs = "".join(v_labels)
+            filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=0[v]")
+
+        filter_complex = ";".join(filter_parts)
+
+        args = ["ffmpeg", "-i", str(input_path), "-filter_complex", filter_complex, "-map", "[v]"]
+        if has_audio:
+            args += ["-map", "[a]"]
+        args += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "22"]
+        if has_audio:
+            args += ["-c:a", "aac", "-b:a", "128k"]
+        args += ["-movflags", "+faststart", "-y", str(out_path)]
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise HTTPException(504, "Trim timed out")
+
+    if proc.returncode != 0:
+        raise HTTPException(500, f"Trim failed: {stderr.decode()[-300:]}")
+
+    if not out_path.exists():
+        raise HTTPException(500, "Trim produced no output")
+
+    return {
+        "id": req.file_id,
+        "filename": out_name,
+        "size": out_path.stat().st_size,
     }
 
 
@@ -663,9 +813,23 @@ async def upload_video(file: UploadFile):
     out_path = out_dir / safe_name
 
     # Stream to disk to avoid loading entire file in memory
-    with open(out_path, "wb") as f:
-        while chunk := await file.read(1024 * 1024):  # 1MB chunks
-            f.write(chunk)
+    written = 0
+    try:
+        with open(out_path, "wb") as f:
+            while chunk := await file.read(1024 * 1024):  # 1MB chunks
+                written += len(chunk)
+                if written > UPLOAD_MAX_BYTES:
+                    f.close()
+                    out_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        413,
+                        f"File too large (max {UPLOAD_MAX_BYTES // (1024*1024)} MB)",
+                    )
+                f.write(chunk)
+    except HTTPException:
+        if out_dir.exists() and not any(out_dir.iterdir()):
+            out_dir.rmdir()
+        raise
 
     return {
         "id": file_id,
@@ -1388,6 +1552,19 @@ def cleanup_old_files():
             d.rmdir()
 
 
+async def _dl_sweeper():
+    """Background task: periodically purge stale /downloads dirs, mirroring
+    _share_sweeper. The opportunistic cleanup_old_files() calls in the
+    download/upload endpoints still run too — this just covers the case where
+    no new requests come in to trigger them."""
+    while True:
+        try:
+            cleanup_old_files()
+        except Exception as e:
+            print(f"[dl-sweeper] error: {e}")
+        await asyncio.sleep(DL_SWEEP_INTERVAL)
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8090)
+    uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("COMPRESS_PORT", 8090)))
