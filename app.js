@@ -1023,9 +1023,15 @@ async function startServerCompression() {
         const uploadRes = await uploadFileToServer(state.file, compressStart);
         if (!jobAlive(job)) return;
 
-        // Step 2: Compress on server
+        // Step 2: Compress on server. Big sources get capped under 100MB and
+        // downscaled server-side — a smaller result and a much faster encode
+        // than holding full resolution at a fixed CRF.
         updateProgress(45);
-        dom.progressStatus.textContent = 'Compressing on server...';
+        const BIG_FILE = 100 * 1024 * 1024;
+        const capped = state.quality !== 'target' && state.file.size > BIG_FILE;
+        dom.progressStatus.textContent = capped
+            ? 'Compressing on server (scaling down to keep it small)…'
+            : 'Compressing on server…';
 
         const compressBody = {
             file_id: uploadRes.id,
@@ -1034,31 +1040,56 @@ async function startServerCompression() {
         };
         if (state.quality === 'target') {
             compressBody.target_mb = QUALITY_PRESETS.target.targetMB;
+        } else if (capped) {
+            compressBody.target_mb = 90; // keep the result under 100 MB
         }
 
-        const compressRes = await fetch(`${DL_API}/compress`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(compressBody),
-            signal,
-        });
+        // The server encode is synchronous with no push progress, so creep the
+        // bar forward slowly instead of freezing at 45%.
+        let creep = 45;
+        const creepTimer = setInterval(() => {
+            creep = Math.min(creep + 1, 78);
+            updateProgress(creep);
+        }, 1500);
+
+        let compressData;
+        try {
+            const compressRes = await fetch(`${DL_API}/compress`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(compressBody),
+                signal,
+            });
+            if (!compressRes.ok) {
+                const err = await compressRes.json().catch(() => ({}));
+                throw new Error(err.detail || 'Server compression failed');
+            }
+            compressData = await compressRes.json();
+        } finally {
+            clearInterval(creepTimer);
+        }
         if (!jobAlive(job)) return;
-
-        if (!compressRes.ok) {
-            const err = await compressRes.json().catch(() => ({}));
-            throw new Error(err.detail || 'Server compression failed');
-        }
-
-        const compressData = await compressRes.json();
         updateProgress(80);
 
-        // Step 3: Download result
+        // Step 3: Download result with a real progress bar (80 -> 100%).
         dom.progressStatus.textContent = `Downloading ${formatBytes(compressData.size)}...`;
-
-        const fileRes = await fetch(`${DL_API}/file/${compressData.id}/${encodeURIComponent(compressData.filename)}`, { signal });
-        if (!fileRes.ok) throw new Error('Could not download compressed file');
-
-        const blob = await fileRes.blob();
+        const blob = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', `${DL_API}/file/${compressData.id}/${encodeURIComponent(compressData.filename)}`);
+            xhr.responseType = 'blob';
+            xhr.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    updateProgress(Math.min(80 + Math.round((e.loaded / e.total) * 20), 99));
+                }
+            };
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) resolve(xhr.response);
+                else reject(new Error('Could not download compressed file'));
+            };
+            xhr.onerror = () => reject(new Error('Could not download compressed file'));
+            if (signal) signal.addEventListener('abort', () => xhr.abort(), { once: true });
+            xhr.send();
+        });
         if (!jobAlive(job)) return;
         state.outputBlob = new Blob([blob], { type: 'video/mp4' });
 

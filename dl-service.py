@@ -648,9 +648,12 @@ async def compress_video(req: CompressRequest):
             args += ["-vf", "scale=-2:480"]
         elif video_kbps < 500:
             args += ["-vf", "scale=-2:720"]
+        else:
+            # Cap at 1080p so 4K sources don't make the encode crawl.
+            args += ["-vf", "scale=-2:'min(1080,ih)'"]
 
         args += [
-            "-c:v", "libx264", "-preset", "medium",
+            "-c:v", "libx264", "-preset", "veryfast",
             "-b:v", f"{video_kbps}k",
             "-maxrate", f"{int(video_kbps * 1.5)}k",
             "-bufsize", f"{int(video_kbps * 2)}k",
