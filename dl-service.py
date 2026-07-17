@@ -133,6 +133,56 @@ async def _ffprobe_duration(path: Path) -> float:
         return 0.0
 
 
+async def _ensure_playable(path: Path) -> Path:
+    """Guarantee iPhone/Safari playback: video must be H.264/HEVC and audio AAC.
+    Otherwise transcode in place (video copy when it's already fine, so an
+    H.264+Opus clip only re-encodes the audio). Most downloads already comply
+    because we ask yt-dlp for avc1+mp4a first; this only fires on AV1/VP9/Opus
+    sources that would otherwise show a broken player on iOS."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error",
+            "-show_entries", "stream=codec_type,codec_name",
+            "-of", "json", str(path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        streams = json.loads(out).get("streams", [])
+    except Exception:
+        return path  # can't probe — leave it alone
+
+    vcodec = next((s.get("codec_name") for s in streams
+                   if s.get("codec_type") == "video"), "")
+    acodec = next((s.get("codec_name") for s in streams
+                   if s.get("codec_type") == "audio"), None)
+    v_ok = vcodec in ("h264", "hevc")
+    a_ok = acodec is None or acodec == "aac"
+    if v_ok and a_ok:
+        return path
+
+    tmp = path.with_suffix(".iosfix.mp4")
+    vargs = (["-c:v", "copy"] if v_ok else
+             ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+              "-pix_fmt", "yuv420p"])
+    aargs = ["-c:a", "copy"] if a_ok else ["-c:a", "aac", "-b:a", "128k"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", str(path), *vargs, *aargs,
+            "-movflags", "+faststart", str(tmp),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=300)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        return path
+    if proc.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+        path.unlink(missing_ok=True)
+        tmp.rename(path)  # keep the original title-based filename
+        return path
+    tmp.unlink(missing_ok=True)
+    return path
+
+
 # ============================================
 # TikTok fallback via tikwm.com API
 # ============================================
@@ -375,7 +425,7 @@ async def download(req: DownloadRequest):
     # TikTok fallback
     if is_tiktok(req.url):
         try:
-            out_file = await tiktok_download(req.url, out_dir)
+            out_file = await _ensure_playable(await tiktok_download(req.url, out_dir))
             return {
                 "id": file_id,
                 "filename": out_file.name,
@@ -390,7 +440,7 @@ async def download(req: DownloadRequest):
     # land on a video-only DASH stream when format selection is too strict).
     if is_instagram(req.url):
         try:
-            out_file = await instagram_download(req.url, out_dir)
+            out_file = await _ensure_playable(await instagram_download(req.url, out_dir))
             return {
                 "id": file_id,
                 "filename": out_file.name,
@@ -406,10 +456,18 @@ async def download(req: DownloadRequest):
 
     proc = await asyncio.create_subprocess_exec(
         *YTDLP_BASE,
-        # `bv*+ba` allows any audio codec (Instagram often serves non-m4a audio
-        # — the older `bestaudio[ext=m4a]` constraint silently fell through to
-        # the video-only `best[ext=mp4]` branch, producing soundless mp4s).
-        "-f", "bv*[ext=mp4]+ba/bv*+ba/b[ext=mp4]/b",
+        # Prefer H.264 (avc1) video + AAC (mp4a) audio so the result plays on
+        # iPhone/Safari, which can't decode AV1 or Opus. YouTube serves avc1+m4a
+        # for essentially every video; without this yt-dlp picks "best" = AV1 in
+        # an mp4 container with Opus audio, which shows a broken player on iOS.
+        # Later fallbacks keep any-codec sources working (a post-download check
+        # transcodes those to H.264/AAC).
+        "-f", (
+            "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/"
+            "bv*[vcodec^=avc1]+ba/"
+            "b[vcodec^=avc1]/"
+            "bv*[ext=mp4]+ba/b[ext=mp4]/b"
+        ),
         "--merge-output-format", "mp4",
         "--no-playlist",
         "--max-filesize", "500m",
@@ -431,7 +489,7 @@ async def download(req: DownloadRequest):
     if not files:
         raise HTTPException(500, "Download completed but no file found")
 
-    out_file = files[0]
+    out_file = await _ensure_playable(files[0])
     return {
         "id": file_id,
         "filename": out_file.name,
